@@ -22,17 +22,15 @@ KEYWORDS = [
     "カルティエ クロノスカフ"
 ]
 
-# 🔥 SESSION (muito mais difícil de bloquear)
+# SESSION (anti-bloqueio leve)
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8",
-    "Accept": "text/html,application/xhtml+xml",
-    "Connection": "keep-alive"
+    "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8"
 })
 
 
-# 🔥 FETCH ANTI-BLOQUEIO
+# FETCH ROBUSTO
 def fetch(url):
     for _ in range(3):
         try:
@@ -43,23 +41,21 @@ def fetch(url):
 
             text = res.text
 
-            # 🔥 DETECTA BLOQUEIO
-            if "Access Denied" in text:
-                return None
-            if "captcha" in text.lower():
-                return None
             if len(text) < 5000:
+                return None
+
+            if "captcha" in text.lower():
                 return None
 
             return text
 
-        except Exception as e:
-            print("fetch error:", e)
+        except:
+            pass
 
     return None
 
 
-# -------- MERCARI --------
+# MERCARI
 def scrape_mercari(keyword):
     url = f"https://jp.mercari.com/search?keyword={keyword}"
     html = fetch(url)
@@ -75,33 +71,20 @@ def scrape_mercari(keyword):
             continue
 
         item_id = "mercari_" + href.split("/")[-1]
-        full_url = f"https://jp.mercari.com{href}"
-
-        title = a.get_text(strip=True)
-
-        img = a.find("img")
-        image = img["src"] if img else None
-
-        price = None
-        for s in a.find_all("span"):
-            if "¥" in s.text:
-                price = s.text
-                break
 
         items.append({
             "id": item_id,
-            "title": title,
-            "price": price,
-            "url": full_url,
-            "image": image,
+            "title": a.get_text(strip=True),
+            "url": f"https://jp.mercari.com{href}",
+            "price": "¥?",
             "type": "Buy Now",
             "source": "Mercari"
         })
 
-    return items[:5]
+    return items[:3]
 
 
-# -------- YAHOO --------
+# YAHOO (FOCO PRINCIPAL)
 def scrape_yahoo(keyword):
     url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&auccat=0"
     html = fetch(url)
@@ -118,31 +101,19 @@ def scrape_yahoo(keyword):
 
         item_id = "yahoo_" + href.split("/")[-1]
 
-        title = a.get_text(strip=True)
-
-        img = a.find("img")
-        image = img["src"] if img else None
-
-        price = None
-        for s in a.find_all("span"):
-            if "円" in s.text:
-                price = s.text
-                break
-
         items.append({
             "id": item_id,
-            "title": title,
-            "price": price,
+            "title": a.get_text(strip=True),
             "url": href,
-            "image": image,
+            "price": "¥?",
             "type": "Auction",
             "source": "Yahoo"
         })
 
-    return items[:5]
+    return items[:3]
 
 
-# -------- RAKUMA --------
+# RAKUMA
 def scrape_rakuma(keyword):
     url = f"https://fril.jp/s?query={keyword}"
     html = fetch(url)
@@ -158,27 +129,19 @@ def scrape_rakuma(keyword):
             continue
 
         item_id = "rakuma_" + href.split("/")[-1]
-        full_url = f"https://fril.jp{href}"
-
-        title = a.get_text(strip=True)
-
-        img = a.find("img")
-        image = img["src"] if img else None
 
         items.append({
             "id": item_id,
-            "title": title,
-            "price": "N/A",
-            "url": full_url,
-            "image": image,
+            "title": a.get_text(strip=True),
+            "url": f"https://fril.jp{href}",
+            "price": "¥?",
             "type": "Buy Now",
             "source": "Rakuma"
         })
 
-    return items[:5]
+    return items[:3]
 
 
-# -------- ZENMARKET --------
 def to_zen(url):
     return f"https://zenmarket.jp/pt/auction.aspx?itemCode={url}"
 
@@ -190,14 +153,14 @@ def translate(text):
         return text
 
 
-# -------- LOOP --------
+# LOOP
 async def run():
     while True:
         for keyword in KEYWORDS:
             try:
                 items = []
+                items += scrape_yahoo(keyword)   # prioridade
                 items += scrape_mercari(keyword)
-                items += scrape_yahoo(keyword)
                 items += scrape_rakuma(keyword)
 
                 for item in items:
@@ -219,24 +182,15 @@ async def run():
 💴 {item['price']}
 ⚡ {item['type']}
 
-🔗 ZenMarket:
-{zen_url}
+🔗 {zen_url}
 """
 
-                    if item["image"]:
-                        await bot.send_photo(
-                            chat_id=CHAT_ID,
-                            photo=item["image"],
-                            caption=msg
-                        )
-                    else:
-                        await bot.send_message(
-                            chat_id=CHAT_ID,
-                            text=msg
-                        )
+                    await bot.send_message(
+                        chat_id=CHAT_ID,
+                        text=msg
+                    )
 
-                # 🔥 anti-bloqueio
-                await asyncio.sleep(random.uniform(3, 6))
+                await asyncio.sleep(random.uniform(2, 4))
 
             except Exception as e:
                 print("erro:", e)
