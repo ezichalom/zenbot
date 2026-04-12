@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 from telegram import Bot
 from deep_translator import GoogleTranslator
+import random
 
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -12,33 +13,60 @@ bot = Bot(token=TOKEN)
 seen = set()
 
 KEYWORDS = [
-    # BVLGARI
     "Bvlgari al38",
-    "bvlgari aluminium al38",
-    "bvlgari al38ta",
     "bvlgari aluminium",
-    "ブルガリ アルミニウム",
-
-    # TAG
-    "tag heuer formula 1 WAZ1110",
-    "tag heuer formula 1 WAZ1112",
-    "tag heuer formula 1 CAZ1010",
     "tag heuer formula 1",
-    "タグホイヤー フォーミュラ1",
-
-    # CARTIER
     "Cartier chronoscaph",
+    "ブルガリ アルミニウム",
+    "タグホイヤー フォーミュラ1",
     "カルティエ クロノスカフ"
 ]
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+# 🔥 SESSION (muito mais difícil de bloquear)
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8",
+    "Accept": "text/html,application/xhtml+xml",
+    "Connection": "keep-alive"
+})
+
+
+# 🔥 FETCH ANTI-BLOQUEIO
+def fetch(url):
+    for _ in range(3):
+        try:
+            res = session.get(url, timeout=15)
+
+            if res.status_code != 200:
+                continue
+
+            text = res.text
+
+            # 🔥 DETECTA BLOQUEIO
+            if "Access Denied" in text:
+                return None
+            if "captcha" in text.lower():
+                return None
+            if len(text) < 5000:
+                return None
+
+            return text
+
+        except Exception as e:
+            print("fetch error:", e)
+
+    return None
 
 
 # -------- MERCARI --------
 def scrape_mercari(keyword):
     url = f"https://jp.mercari.com/search?keyword={keyword}"
-    soup = BeautifulSoup(requests.get(url, headers=HEADERS).text, "html.parser")
+    html = fetch(url)
+    if not html:
+        return []
 
+    soup = BeautifulSoup(html, "html.parser")
     items = []
 
     for a in soup.select("a[href*='/item/']"):
@@ -46,8 +74,8 @@ def scrape_mercari(keyword):
         if not href:
             continue
 
-        full_url = f"https://jp.mercari.com{href}"
         item_id = "mercari_" + href.split("/")[-1]
+        full_url = f"https://jp.mercari.com{href}"
 
         title = a.get_text(strip=True)
 
@@ -73,11 +101,14 @@ def scrape_mercari(keyword):
     return items[:5]
 
 
-# -------- YAHOO AUCTIONS --------
+# -------- YAHOO --------
 def scrape_yahoo(keyword):
-    url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}"
-    soup = BeautifulSoup(requests.get(url, headers=HEADERS).text, "html.parser")
+    url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&auccat=0"
+    html = fetch(url)
+    if not html:
+        return []
 
+    soup = BeautifulSoup(html, "html.parser")
     items = []
 
     for a in soup.select("a[href*='/auction/']"):
@@ -114,8 +145,11 @@ def scrape_yahoo(keyword):
 # -------- RAKUMA --------
 def scrape_rakuma(keyword):
     url = f"https://fril.jp/s?query={keyword}"
-    soup = BeautifulSoup(requests.get(url, headers=HEADERS).text, "html.parser")
+    html = fetch(url)
+    if not html:
+        return []
 
+    soup = BeautifulSoup(html, "html.parser")
     items = []
 
     for a in soup.select("a[href*='/item/']"):
@@ -123,8 +157,8 @@ def scrape_rakuma(keyword):
         if not href:
             continue
 
-        full_url = f"https://fril.jp{href}"
         item_id = "rakuma_" + href.split("/")[-1]
+        full_url = f"https://fril.jp{href}"
 
         title = a.get_text(strip=True)
 
@@ -156,7 +190,7 @@ def translate(text):
         return text
 
 
-# -------- MAIN LOOP --------
+# -------- LOOP --------
 async def run():
     while True:
         for keyword in KEYWORDS:
@@ -200,6 +234,9 @@ async def run():
                             chat_id=CHAT_ID,
                             text=msg
                         )
+
+                # 🔥 anti-bloqueio
+                await asyncio.sleep(random.uniform(3, 6))
 
             except Exception as e:
                 print("erro:", e)
