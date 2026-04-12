@@ -1,5 +1,6 @@
 import os
 import asyncio
+import logging
 import requests
 from io import BytesIO
 from bs4 import BeautifulSoup
@@ -9,12 +10,14 @@ from urllib.parse import quote_plus, urljoin, urlparse
 
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+SEND_PHOTOS = os.getenv("SEND_PHOTOS", "false").lower() == "true"
 
 if not TOKEN or not CHAT_ID:
     raise RuntimeError("As variáveis de ambiente TOKEN e CHAT_ID são obrigatórias.")
 
 bot = Bot(token=TOKEN)
 seen = set()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 KEYWORDS = [
     # BVLGARI
@@ -44,6 +47,14 @@ def fetch_soup(url):
     response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     return BeautifulSoup(response.text, "html.parser")
+
+
+def safe_scrape(scraper, keyword):
+    try:
+        return scraper(keyword)
+    except Exception as e:
+        logging.warning("falha no scraper %s para '%s': %s", scraper.__name__, keyword, e)
+        return []
 
 
 def normalize_image_url(image_url, base_url):
@@ -195,12 +206,13 @@ def to_zen(url):
 def translate(text):
     try:
         return GoogleTranslator(source='auto', target='pt').translate(text)
-    except:
+    except Exception as e:
+        logging.warning("falha ao traduzir texto '%s': %s", text, e)
         return text
 
 
 async def send_item(item, message):
-    if item["image"]:
+    if SEND_PHOTOS and item["image"]:
         try:
             image_data = fetch_image_bytes(item["image"])
             await bot.send_photo(
@@ -210,7 +222,7 @@ async def send_item(item, message):
             )
             return
         except Exception as e:
-            print(f"aviso: falha ao enviar foto ({item['image']}): {e}")
+            logging.warning("falha ao enviar foto (%s): %s", item["image"], e)
 
     try:
         await bot.send_message(
@@ -218,7 +230,7 @@ async def send_item(item, message):
             text=message
         )
     except Exception as e:
-        print(f"erro: falha ao enviar mensagem de texto: {e}")
+        logging.error("falha ao enviar mensagem de texto: %s", e)
 
 
 # -------- MAIN LOOP --------
@@ -227,9 +239,9 @@ async def run():
         for keyword in KEYWORDS:
             try:
                 items = []
-                items += scrape_mercari(keyword)
-                items += scrape_yahoo(keyword)
-                items += scrape_rakuma(keyword)
+                items += safe_scrape(scrape_mercari, keyword)
+                items += safe_scrape(scrape_yahoo, keyword)
+                items += safe_scrape(scrape_rakuma, keyword)
 
                 for item in items:
                     if item["id"] in seen:
@@ -252,12 +264,15 @@ async def run():
 
 🔗 ZenMarket:
 {zen_url}
+
+🔗 Original:
+{item['url']}
 """
 
                     await send_item(item, msg)
 
             except Exception as e:
-                print("erro:", e)
+                logging.error("erro no loop principal para '%s': %s", keyword, e)
 
         await asyncio.sleep(30)
 
