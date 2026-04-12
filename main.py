@@ -13,15 +13,25 @@ CHAT_ID = os.getenv("CHAT_ID")
 bot = Bot(token=TOKEN)
 seen = set()
 
+# 🔥 KEYWORDS
 KEYWORDS = [
     "tag heuer WAZ1110",
+    "tag heuer WAZ1112",
+    "tag heuer CAZ1010",
     "bvlgari aluminium AL38",
+    "bvlgari scuba",
     "Omega Speedmaster 3513",
-    "タグホイヤー フォーミュラ1",
-    "ブルガリ アルミニウム"
+    "オメガ スピードマスター",
+    "ブルガリ アルミニウム",
 ]
 
-BAD_WORDS = ["belt", "strap", "ベルト", "band", "部品"]
+# 🔥 FILTRO DE LIXO
+BAD_WORDS = [
+    "belt", "strap", "ベルト",
+    "band", "バンド",
+    "部品", "parts",
+    "ケースのみ", "case only"
+]
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -31,6 +41,7 @@ USER_AGENTS = [
 JPY_TO_BRL = 0.035
 
 
+# 🔥 CONVERSÃO
 def convert_price(price_text):
     try:
         value = int(re.sub(r"[^\d]", "", price_text))
@@ -40,6 +51,7 @@ def convert_price(price_text):
         return price_text
 
 
+# 🔥 FETCH
 def fetch(url):
     try:
         res = requests.get(
@@ -57,7 +69,26 @@ def fetch(url):
     return None
 
 
-# 🔥 YAHOO COM FILTRO DE TEMPO
+# 🔥 SAFE SEND (resolve erro telegram)
+async def safe_send(bot, chat_id, item, msg):
+    if item.get("image"):
+        try:
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=item["image"],
+                caption=msg
+            )
+            return
+        except Exception as e:
+            print("erro imagem:", e)
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text=msg
+    )
+
+
+# 🔥 YAHOO (filtrado por tempo)
 def scrape_yahoo(keyword):
     url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&ei=UTF-8"
     html = fetch(url)
@@ -74,10 +105,10 @@ def scrape_yahoo(keyword):
             if any(b.lower() in title.lower() for b in BAD_WORDS):
                 continue
 
-            time_text = li.get_text()
+            full_text = li.get_text()
 
-            # 🔥 FILTRO TEMPO
-            if not ("1日" in time_text or "時間" in time_text):
+            # 🔥 filtro tempo (terminando em breve)
+            if not ("1日" in full_text or "時間" in full_text):
                 continue
 
             a = li.select_one("a")
@@ -103,7 +134,7 @@ def scrape_yahoo(keyword):
     return items[:5]
 
 
-# 🔥 MERCARI (SNIPER)
+# 🔥 MERCARI (sniper rápido)
 def scrape_mercari(keyword):
     url = f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc"
     html = fetch(url)
@@ -140,14 +171,16 @@ def scrape_mercari(keyword):
     return items[:5]
 
 
-def to_zen_yahoo(id):
-    return f"https://zenmarket.jp/pt/auction.aspx?itemCode={id}"
+# 🔥 LINKS
+def to_zen_yahoo(item_id):
+    return f"https://zenmarket.jp/pt/auction.aspx?itemCode={item_id}"
 
 
 def to_zen_direct(url):
     return f"https://zenmarket.jp/pt/?url={url}"
 
 
+# 🔥 TRADUÇÃO
 def translate(text):
     try:
         return GoogleTranslator(source='auto', target='pt').translate(text)
@@ -155,16 +188,18 @@ def translate(text):
         return text
 
 
+# 🔥 LOOP PRINCIPAL
 async def run():
     while True:
 
-        # 🔥 SNIPER (rápido)
+        # ⚡ MERCARI (rápido)
         for keyword in KEYWORDS:
-            mercari_items = scrape_mercari(keyword)
+            items = scrape_mercari(keyword)
 
-            for item in mercari_items:
+            for item in items:
                 if item["id"] in seen:
                     continue
+
                 seen.add(item["id"])
 
                 title = translate(item["title"])[:60]
@@ -179,17 +214,18 @@ async def run():
 🔗 {link}
 """
 
-                await bot.send_message(chat_id=CHAT_ID, text=msg)
+                await safe_send(bot, CHAT_ID, item, msg)
 
         await asyncio.sleep(25)
 
-        # 🔥 YAHOO (lento + filtrado)
+        # 🔥 YAHOO (lento + inteligente)
         for keyword in KEYWORDS:
-            yahoo_items = scrape_yahoo(keyword)
+            items = scrape_yahoo(keyword)
 
-            for item in yahoo_items:
+            for item in items:
                 if item["id"] in seen:
                     continue
+
                 seen.add(item["id"])
 
                 title = translate(item["title"])[:60]
@@ -205,10 +241,7 @@ async def run():
 🔗 {link}
 """
 
-                if item["image"]:
-                    await bot.send_photo(chat_id=CHAT_ID, photo=item["image"], caption=msg)
-                else:
-                    await bot.send_message(chat_id=CHAT_ID, text=msg)
+                await safe_send(bot, CHAT_ID, item, msg)
 
         await asyncio.sleep(90)
 
