@@ -41,7 +41,7 @@ USER_AGENTS = [
 JPY_TO_BRL = 0.035
 
 
-# 🔥 CONVERSÃO
+# 🔥 CONVERSÃO ¥ → R$
 def convert_price(price_text):
     try:
         value = int(re.sub(r"[^\d]", "", price_text))
@@ -69,26 +69,7 @@ def fetch(url):
     return None
 
 
-# 🔥 SAFE SEND (resolve erro telegram)
-async def safe_send(bot, chat_id, item, msg):
-    if item.get("image"):
-        try:
-            await bot.send_photo(
-                chat_id=chat_id,
-                photo=item["image"],
-                caption=msg
-            )
-            return
-        except Exception as e:
-            print("erro imagem:", e)
-
-    await bot.send_message(
-        chat_id=chat_id,
-        text=msg
-    )
-
-
-# 🔥 YAHOO (filtrado por tempo)
+# 🔥 YAHOO (leilão inteligente)
 def scrape_yahoo(keyword):
     url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&ei=UTF-8"
     html = fetch(url)
@@ -107,7 +88,7 @@ def scrape_yahoo(keyword):
 
             full_text = li.get_text()
 
-            # 🔥 filtro tempo (terminando em breve)
+            # 🔥 só itens próximos do fim
             if not ("1日" in full_text or "時間" in full_text):
                 continue
 
@@ -118,14 +99,10 @@ def scrape_yahoo(keyword):
             price_tag = li.select_one(".Product__priceValue")
             price = price_tag.get_text(strip=True) if price_tag else "N/A"
 
-            img = li.select_one("img")
-            image = img["src"] if img else None
-
             items.append({
                 "id": auction_id,
                 "title": title,
-                "price": price,
-                "image": image
+                "price": price
             })
 
         except:
@@ -154,14 +131,9 @@ def scrape_mercari(keyword):
             href = a.get("href")
             item_id = href.split("/")[-1]
 
-            img = a.find("img")
-            image = img["src"] if img else None
-
             items.append({
                 "id": "mercari_" + item_id,
                 "title": title,
-                "price": "Buy Now",
-                "image": image,
                 "url": f"https://jp.mercari.com{href}"
             })
 
@@ -188,11 +160,11 @@ def translate(text):
         return text
 
 
-# 🔥 LOOP PRINCIPAL
+# 🔥 LOOP
 async def run():
     while True:
 
-        # ⚡ MERCARI (rápido)
+        # ⚡ COMPRA IMEDIATA
         for keyword in KEYWORDS:
             items = scrape_mercari(keyword)
 
@@ -209,16 +181,16 @@ async def run():
 
 ⌚ {title}
 
-💰 BUY NOW
+💰 Buy Now
 
 🔗 {link}
 """
 
-                await safe_send(bot, CHAT_ID, item, msg)
+                await bot.send_message(chat_id=CHAT_ID, text=msg)
 
         await asyncio.sleep(25)
 
-        # 🔥 YAHOO (lento + inteligente)
+        # 🔥 LEILÃO
         for keyword in KEYWORDS:
             items = scrape_yahoo(keyword)
 
@@ -241,7 +213,7 @@ async def run():
 🔗 {link}
 """
 
-                await safe_send(bot, CHAT_ID, item, msg)
+                await bot.send_message(chat_id=CHAT_ID, text=msg)
 
         await asyncio.sleep(90)
 
