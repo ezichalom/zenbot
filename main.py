@@ -1,9 +1,9 @@
 import os
 import asyncio
 import requests
+from io import BytesIO
 from bs4 import BeautifulSoup
 from telegram import Bot
-from telegram.error import TelegramError
 from deep_translator import GoogleTranslator
 from urllib.parse import quote_plus, urljoin, urlparse
 
@@ -61,6 +61,20 @@ def normalize_image_url(image_url, base_url):
         return None
 
     return image_url
+
+
+def fetch_image_bytes(image_url):
+    response = requests.get(image_url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+    response.raise_for_status()
+
+    content_type = response.headers.get("Content-Type", "").lower()
+    if not content_type.startswith("image/"):
+        raise ValueError(f"conteúdo não é imagem: {content_type or 'desconhecido'}")
+
+    image_data = BytesIO(response.content)
+    image_data.name = "item.jpg"
+    image_data.seek(0)
+    return image_data
 
 
 # -------- MERCARI --------
@@ -188,13 +202,14 @@ def translate(text):
 async def send_item(item, message):
     if item["image"]:
         try:
+            image_data = fetch_image_bytes(item["image"])
             await bot.send_photo(
                 chat_id=CHAT_ID,
-                photo=item["image"],
+                photo=image_data,
                 caption=message
             )
             return
-        except TelegramError as e:
+        except Exception as e:
             print(f"aviso: falha ao enviar foto ({item['image']}): {e}")
 
     try:
@@ -202,7 +217,7 @@ async def send_item(item, message):
             chat_id=CHAT_ID,
             text=message
         )
-    except TelegramError as e:
+    except Exception as e:
         print(f"erro: falha ao enviar mensagem de texto: {e}")
 
 
