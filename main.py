@@ -55,7 +55,7 @@ def fetch(url):
     return None
 
 
-# -------- YAHOO (PRINCIPAL) --------
+# -------- YAHOO --------
 def scrape_yahoo(keyword):
     url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&ei=UTF-8"
     html = fetch(url)
@@ -89,7 +89,7 @@ def scrape_yahoo(keyword):
             "url": clean_url,
             "auction_id": auction_id,
             "price": price,
-            "type": "Auction",
+            "type": "Leilão",
             "source": "Yahoo"
         })
 
@@ -118,7 +118,7 @@ def scrape_mercari(keyword):
             "title": a.get_text(strip=True),
             "url": f"https://jp.mercari.com{href}",
             "price": "N/A",
-            "type": "Buy Now",
+            "type": "Compra direta",
             "source": "Mercari"
         })
 
@@ -147,14 +147,14 @@ def scrape_rakuma(keyword):
             "title": a.get_text(strip=True),
             "url": f"https://fril.jp{href}",
             "price": "N/A",
-            "type": "Buy Now",
+            "type": "Compra direta",
             "source": "Rakuma"
         })
 
     return items[:3]
 
 
-# -------- ZENMARKET CORRETO --------
+# -------- ZENMARKET --------
 def to_zen(item):
     if item["source"] == "Yahoo":
         return f"https://zenmarket.jp/pt/auction.aspx?itemCode={item['auction_id']}"
@@ -186,20 +186,20 @@ async def run():
 
                     seen.add(item["id"])
 
-                    translated = translate(item["title"])
+                    title = translate(item["title"])[:80].upper()
+                    price = item["price"] if item["price"] != "N/A" else "Não informado"
                     zen_url = to_zen(item)
 
-                    msg = f"""
-🔥 OPORTUNIDADE
+                    msg = f"""🔥 OPORTUNIDADE ({item['source'].upper()})
 
-📦 {item['source']}
-🔍 {keyword}
+⌚ {title}
 
-📝 {translated}
-💴 {item['price']}
-⚡ {item['type']}
+💰 Preço: {price}
+📦 Tipo: {item['type']}
+🚚 Frete: Não informado
 
-🔗 {zen_url}
+🔗 Comprar:
+{zen_url}
 """
 
                     await bot.send_message(
