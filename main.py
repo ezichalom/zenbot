@@ -3,6 +3,7 @@ import asyncio
 import requests
 from bs4 import BeautifulSoup
 from telegram import Bot
+from telegram.error import TelegramError
 from deep_translator import GoogleTranslator
 
 TOKEN = os.getenv("TOKEN")
@@ -156,6 +157,24 @@ def translate(text):
         return text
 
 
+async def send_item(item, message):
+    if item["image"]:
+        try:
+            await bot.send_photo(
+                chat_id=CHAT_ID,
+                photo=item["image"],
+                caption=message
+            )
+            return
+        except TelegramError as e:
+            print(f"aviso: falha ao enviar foto ({item['image']}): {e}")
+
+    await bot.send_message(
+        chat_id=CHAT_ID,
+        text=message
+    )
+
+
 # -------- MAIN LOOP --------
 async def run():
     while True:
@@ -189,17 +208,7 @@ async def run():
 {zen_url}
 """
 
-                    if item["image"]:
-                        await bot.send_photo(
-                            chat_id=CHAT_ID,
-                            photo=item["image"],
-                            caption=msg
-                        )
-                    else:
-                        await bot.send_message(
-                            chat_id=CHAT_ID,
-                            text=msg
-                        )
+                    await send_item(item, msg)
 
             except Exception as e:
                 print("erro:", e)
