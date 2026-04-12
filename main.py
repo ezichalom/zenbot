@@ -13,49 +13,39 @@ bot = Bot(token=TOKEN)
 seen = set()
 
 KEYWORDS = [
-    "Bvlgari al38",
-    "bvlgari aluminium",
     "tag heuer formula 1",
-    "Cartier chronoscaph",
-    "ブルガリ アルミニウム",
+    "bvlgari aluminium",
+    "cartier chronoscaph",
     "タグホイヤー フォーミュラ1",
-    "カルティエ クロノスカフ"
+    "ブルガリ アルミニウム",
 ]
 
-# SESSION
+# FILTRO DE LIXO
+BAD_WORDS = [
+    "ベルト", "belt", "pulseira",
+    "strap", "バンド", "band",
+    "ケースのみ", "case only",
+    "ジャンク部品"
+]
+
 session = requests.Session()
 session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8"
+    "User-Agent": "Mozilla/5.0",
+    "Accept-Language": "ja-JP,ja;q=0.9"
 })
 
 
-# FETCH
 def fetch(url):
-    for _ in range(3):
-        try:
-            res = session.get(url, timeout=15)
-
-            if res.status_code != 200:
-                continue
-
-            text = res.text
-
-            if len(text) < 5000:
-                return None
-
-            if "captcha" in text.lower():
-                return None
-
-            return text
-
-        except:
-            pass
-
+    try:
+        res = session.get(url, timeout=15)
+        if res.status_code == 200 and len(res.text) > 5000:
+            return res.text
+    except:
+        pass
     return None
 
 
-# -------- YAHOO --------
+# -------- YAHOO MELHORADO --------
 def scrape_yahoo(keyword):
     url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&ei=UTF-8"
     html = fetch(url)
@@ -65,101 +55,51 @@ def scrape_yahoo(keyword):
     soup = BeautifulSoup(html, "html.parser")
     items = []
 
-    for a in soup.select("a[href*='/auction/']"):
-        href = a.get("href")
-        if not href:
+    for item in soup.select("li.Product"):
+        try:
+            link_tag = item.select_one("a")
+            if not link_tag:
+                continue
+
+            href = link_tag.get("href")
+            clean_url = href.split("?")[0]
+            auction_id = clean_url.split("/")[-1]
+
+            title_tag = item.select_one("h3")
+            title = title_tag.get_text(strip=True) if title_tag else ""
+
+            # filtro lixo
+            if any(bad.lower() in title.lower() for bad in BAD_WORDS):
+                continue
+
+            # preço
+            price_tag = item.select_one(".Product__priceValue")
+            price = price_tag.get_text(strip=True) if price_tag else "N/A"
+
+            # imagem
+            img_tag = item.select_one("img")
+            image = img_tag["src"] if img_tag else None
+
+            items.append({
+                "id": "yahoo_" + auction_id,
+                "title": title,
+                "price": price,
+                "url": clean_url,
+                "auction_id": auction_id,
+                "image": image,
+                "type": "Leilão",
+                "source": "Yahoo"
+            })
+
+        except:
             continue
-
-        clean_url = href.split("?")[0]
-        auction_id = clean_url.split("/")[-1]
-
-        title = a.get_text(strip=True)
-
-        # preço
-        price = "N/A"
-        for span in a.find_all("span"):
-            txt = span.get_text()
-            if "円" in txt:
-                price = txt.strip()
-                break
-
-        items.append({
-            "id": "yahoo_" + auction_id,
-            "title": title,
-            "url": clean_url,
-            "auction_id": auction_id,
-            "price": price,
-            "type": "Leilão",
-            "source": "Yahoo"
-        })
 
     return items[:5]
 
 
-# -------- MERCARI --------
-def scrape_mercari(keyword):
-    url = f"https://jp.mercari.com/search?keyword={keyword}"
-    html = fetch(url)
-    if not html:
-        return []
-
-    soup = BeautifulSoup(html, "html.parser")
-    items = []
-
-    for a in soup.select("a[href*='/item/']"):
-        href = a.get("href")
-        if not href:
-            continue
-
-        item_id = href.split("/")[-1]
-
-        items.append({
-            "id": "mercari_" + item_id,
-            "title": a.get_text(strip=True),
-            "url": f"https://jp.mercari.com{href}",
-            "price": "N/A",
-            "type": "Compra direta",
-            "source": "Mercari"
-        })
-
-    return items[:3]
-
-
-# -------- RAKUMA --------
-def scrape_rakuma(keyword):
-    url = f"https://fril.jp/s?query={keyword}"
-    html = fetch(url)
-    if not html:
-        return []
-
-    soup = BeautifulSoup(html, "html.parser")
-    items = []
-
-    for a in soup.select("a[href*='/item/']"):
-        href = a.get("href")
-        if not href:
-            continue
-
-        item_id = href.split("/")[-1]
-
-        items.append({
-            "id": "rakuma_" + item_id,
-            "title": a.get_text(strip=True),
-            "url": f"https://fril.jp{href}",
-            "price": "N/A",
-            "type": "Compra direta",
-            "source": "Rakuma"
-        })
-
-    return items[:3]
-
-
 # -------- ZENMARKET --------
 def to_zen(item):
-    if item["source"] == "Yahoo":
-        return f"https://zenmarket.jp/pt/auction.aspx?itemCode={item['auction_id']}"
-    else:
-        return f"https://zenmarket.jp/pt/?url={item['url']}"
+    return f"https://zenmarket.jp/pt/auction.aspx?itemCode={item['auction_id']}"
 
 
 def translate(text):
@@ -174,11 +114,7 @@ async def run():
     while True:
         for keyword in KEYWORDS:
             try:
-                items = []
-
-                items += scrape_yahoo(keyword)
-                items += scrape_mercari(keyword)
-                items += scrape_rakuma(keyword)
+                items = scrape_yahoo(keyword)
 
                 for item in items:
                     if item["id"] in seen:
@@ -186,26 +122,33 @@ async def run():
 
                     seen.add(item["id"])
 
-                    title = translate(item["title"])[:80].upper()
-                    price = item["price"] if item["price"] != "N/A" else "Não informado"
+                    title = translate(item["title"])[:80]
+                    price = item["price"] if item["price"] != "N/A" else "Consultar"
+
                     zen_url = to_zen(item)
 
-                    msg = f"""🔥 OPORTUNIDADE ({item['source'].upper()})
+                    msg = f"""🔥 OPORTUNIDADE
 
 ⌚ {title}
 
-💰 Preço: {price}
-📦 Tipo: {item['type']}
-🚚 Frete: Não informado
+💰 {price}
+⚡ Leilão
 
 🔗 Comprar:
 {zen_url}
 """
 
-                    await bot.send_message(
-                        chat_id=CHAT_ID,
-                        text=msg
-                    )
+                    if item["image"]:
+                        await bot.send_photo(
+                            chat_id=CHAT_ID,
+                            photo=item["image"],
+                            caption=msg
+                        )
+                    else:
+                        await bot.send_message(
+                            chat_id=CHAT_ID,
+                            text=msg
+                        )
 
                 await asyncio.sleep(random.uniform(2, 4))
 
