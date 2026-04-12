@@ -195,3 +195,4 @@ async def run():
         await asyncio.sleep(30)
 
 asyncio.run(run())
+await bot.send_message(chat_id=CHAT_ID, text="TESTE MULTI MARKETPLACE 🚀")
