@@ -22,7 +22,7 @@ KEYWORDS = [
     "カルティエ クロノスカフ"
 ]
 
-# SESSION (anti-bloqueio leve)
+# SESSION
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -30,7 +30,7 @@ session.headers.update({
 })
 
 
-# FETCH ROBUSTO
+# FETCH
 def fetch(url):
     for _ in range(3):
         try:
@@ -55,7 +55,39 @@ def fetch(url):
     return None
 
 
-# MERCARI
+# -------- YAHOO (PRINCIPAL) --------
+def scrape_yahoo(keyword):
+    url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&ei=UTF-8"
+    html = fetch(url)
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    items = []
+
+    for a in soup.select("a[href*='/auction/']"):
+        href = a.get("href")
+        if not href:
+            continue
+
+        clean_url = href.split("?")[0]
+        item_id = "yahoo_" + clean_url.split("/")[-1]
+
+        title = a.get_text(strip=True)
+
+        items.append({
+            "id": item_id,
+            "title": title,
+            "url": clean_url,
+            "price": "¥?",
+            "type": "Auction",
+            "source": "Yahoo"
+        })
+
+    return items[:5]
+
+
+# -------- MERCARI --------
 def scrape_mercari(keyword):
     url = f"https://jp.mercari.com/search?keyword={keyword}"
     html = fetch(url)
@@ -84,36 +116,7 @@ def scrape_mercari(keyword):
     return items[:3]
 
 
-# YAHOO (FOCO PRINCIPAL)
-def scrape_yahoo(keyword):
-    url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&auccat=0"
-    html = fetch(url)
-    if not html:
-        return []
-
-    soup = BeautifulSoup(html, "html.parser")
-    items = []
-
-    for a in soup.select("a[href*='/auction/']"):
-        href = a.get("href")
-        if not href:
-            continue
-
-        item_id = "yahoo_" + href.split("/")[-1]
-
-        items.append({
-            "id": item_id,
-            "title": a.get_text(strip=True),
-            "url": href,
-            "price": "¥?",
-            "type": "Auction",
-            "source": "Yahoo"
-        })
-
-    return items[:3]
-
-
-# RAKUMA
+# -------- RAKUMA --------
 def scrape_rakuma(keyword):
     url = f"https://fril.jp/s?query={keyword}"
     html = fetch(url)
@@ -142,8 +145,9 @@ def scrape_rakuma(keyword):
     return items[:3]
 
 
+# -------- ZENMARKET (CORRIGIDO) --------
 def to_zen(url):
-    return f"https://zenmarket.jp/pt/auction.aspx?itemCode={url}"
+    return f"https://zenmarket.jp/pt/?url={url}"
 
 
 def translate(text):
@@ -153,13 +157,15 @@ def translate(text):
         return text
 
 
-# LOOP
+# -------- LOOP --------
 async def run():
     while True:
         for keyword in KEYWORDS:
             try:
                 items = []
-                items += scrape_yahoo(keyword)   # prioridade
+
+                # PRIORIDADE → Yahoo (mais confiável)
+                items += scrape_yahoo(keyword)
                 items += scrape_mercari(keyword)
                 items += scrape_rakuma(keyword)
 
@@ -190,6 +196,7 @@ async def run():
                         text=msg
                     )
 
+                # anti-bloqueio
                 await asyncio.sleep(random.uniform(2, 4))
 
             except Exception as e:
