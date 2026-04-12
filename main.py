@@ -71,15 +71,24 @@ def scrape_yahoo(keyword):
             continue
 
         clean_url = href.split("?")[0]
-        item_id = "yahoo_" + clean_url.split("/")[-1]
+        auction_id = clean_url.split("/")[-1]
 
         title = a.get_text(strip=True)
 
+        # preço
+        price = "N/A"
+        for span in a.find_all("span"):
+            txt = span.get_text()
+            if "円" in txt:
+                price = txt.strip()
+                break
+
         items.append({
-            "id": item_id,
+            "id": "yahoo_" + auction_id,
             "title": title,
             "url": clean_url,
-            "price": "¥?",
+            "auction_id": auction_id,
+            "price": price,
             "type": "Auction",
             "source": "Yahoo"
         })
@@ -102,13 +111,13 @@ def scrape_mercari(keyword):
         if not href:
             continue
 
-        item_id = "mercari_" + href.split("/")[-1]
+        item_id = href.split("/")[-1]
 
         items.append({
-            "id": item_id,
+            "id": "mercari_" + item_id,
             "title": a.get_text(strip=True),
             "url": f"https://jp.mercari.com{href}",
-            "price": "¥?",
+            "price": "N/A",
             "type": "Buy Now",
             "source": "Mercari"
         })
@@ -131,13 +140,13 @@ def scrape_rakuma(keyword):
         if not href:
             continue
 
-        item_id = "rakuma_" + href.split("/")[-1]
+        item_id = href.split("/")[-1]
 
         items.append({
-            "id": item_id,
+            "id": "rakuma_" + item_id,
             "title": a.get_text(strip=True),
             "url": f"https://fril.jp{href}",
-            "price": "¥?",
+            "price": "N/A",
             "type": "Buy Now",
             "source": "Rakuma"
         })
@@ -145,9 +154,12 @@ def scrape_rakuma(keyword):
     return items[:3]
 
 
-# -------- ZENMARKET (CORRIGIDO) --------
-def to_zen(url):
-    return f"https://zenmarket.jp/pt/?url={url}"
+# -------- ZENMARKET CORRETO --------
+def to_zen(item):
+    if item["source"] == "Yahoo":
+        return f"https://zenmarket.jp/pt/auction.aspx?itemCode={item['auction_id']}"
+    else:
+        return f"https://zenmarket.jp/pt/?url={item['url']}"
 
 
 def translate(text):
@@ -164,7 +176,6 @@ async def run():
             try:
                 items = []
 
-                # PRIORIDADE → Yahoo (mais confiável)
                 items += scrape_yahoo(keyword)
                 items += scrape_mercari(keyword)
                 items += scrape_rakuma(keyword)
@@ -176,7 +187,7 @@ async def run():
                     seen.add(item["id"])
 
                     translated = translate(item["title"])
-                    zen_url = to_zen(item["url"])
+                    zen_url = to_zen(item)
 
                     msg = f"""
 🔥 OPORTUNIDADE
@@ -196,7 +207,6 @@ async def run():
                         text=msg
                     )
 
-                # anti-bloqueio
                 await asyncio.sleep(random.uniform(2, 4))
 
             except Exception as e:
