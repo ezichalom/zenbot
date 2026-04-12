@@ -13,31 +13,21 @@ CHAT_ID = os.getenv("CHAT_ID")
 bot = Bot(token=TOKEN)
 seen = set()
 
-# 🔥 KEYWORDS
 KEYWORDS = [
     "tag heuer WAZ1110",
-    "tag heuer WAZ1112",
-    "tag heuer CAZ1010",
     "bvlgari aluminium AL38",
-    "bvlgari scuba",
     "Omega Speedmaster 3513",
-    "オメガ スピードマスター",
-    "ブルガリ アルミニウム",
+    "タグホイヤー フォーミュラ1",
+    "ブルガリ アルミニウム"
 ]
 
-BAD_WORDS = [
-    "ベルト", "belt", "pulseira",
-    "strap", "バンド", "band",
-    "ケースのみ", "case only",
-    "部品"
-]
+BAD_WORDS = ["belt", "strap", "ベルト", "band", "部品"]
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
 ]
 
-# 🔥 TAXA APROXIMADA (ajustável)
 JPY_TO_BRL = 0.035
 
 
@@ -51,37 +41,25 @@ def convert_price(price_text):
 
 
 def fetch(url):
-    for _ in range(3):
-        try:
-            res = requests.get(
-                url,
-                headers={
-                    "User-Agent": random.choice(USER_AGENTS),
-                    "Accept-Language": "ja-JP"
-                },
-                timeout=15
-            )
-
-            if res.status_code != 200:
-                continue
-
-            text = res.text
-
-            if "captcha" in text.lower():
-                continue
-            if len(text) < 5000:
-                continue
-
-            return text
-
-        except:
-            pass
-
+    try:
+        res = requests.get(
+            url,
+            headers={
+                "User-Agent": random.choice(USER_AGENTS),
+                "Accept-Language": "ja-JP"
+            },
+            timeout=10
+        )
+        if res.status_code == 200 and len(res.text) > 3000:
+            return res.text
+    except:
+        pass
     return None
 
 
+# 🔥 YAHOO COM FILTRO DE TEMPO
 def scrape_yahoo(keyword):
-    url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&ei=UTF-8&sort=end&order=d"
+    url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&ei=UTF-8"
     html = fetch(url)
     if not html:
         return []
@@ -91,24 +69,26 @@ def scrape_yahoo(keyword):
 
     for li in soup.select("li.Product"):
         try:
-            a = li.select_one("a")
-            if not a:
-                continue
-
-            href = a.get("href")
-            clean_url = href.split("?")[0]
-            auction_id = clean_url.split("/")[-1]
-
             title = li.select_one("h3").get_text(strip=True)
 
             if any(b.lower() in title.lower() for b in BAD_WORDS):
                 continue
 
+            time_text = li.get_text()
+
+            # 🔥 FILTRO TEMPO
+            if not ("1日" in time_text or "時間" in time_text):
+                continue
+
+            a = li.select_one("a")
+            href = a.get("href")
+            auction_id = href.split("/")[-1]
+
             price_tag = li.select_one(".Product__priceValue")
             price = price_tag.get_text(strip=True) if price_tag else "N/A"
 
-            img_tag = li.select_one("img")
-            image = img_tag["src"] if img_tag else None
+            img = li.select_one("img")
+            image = img["src"] if img else None
 
             items.append({
                 "id": auction_id,
@@ -120,11 +100,52 @@ def scrape_yahoo(keyword):
         except:
             continue
 
-    return items[:10]  # 🔥 sniper intermediário
+    return items[:5]
 
 
-def to_zen(item):
-    return f"https://zenmarket.jp/pt/auction.aspx?itemCode={item['id']}"
+# 🔥 MERCARI (SNIPER)
+def scrape_mercari(keyword):
+    url = f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc"
+    html = fetch(url)
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    items = []
+
+    for a in soup.select("a[href*='/item/']"):
+        try:
+            title = a.get_text(strip=True)
+
+            if any(b.lower() in title.lower() for b in BAD_WORDS):
+                continue
+
+            href = a.get("href")
+            item_id = href.split("/")[-1]
+
+            img = a.find("img")
+            image = img["src"] if img else None
+
+            items.append({
+                "id": "mercari_" + item_id,
+                "title": title,
+                "price": "Buy Now",
+                "image": image,
+                "url": f"https://jp.mercari.com{href}"
+            })
+
+        except:
+            continue
+
+    return items[:5]
+
+
+def to_zen_yahoo(id):
+    return f"https://zenmarket.jp/pt/auction.aspx?itemCode={id}"
+
+
+def to_zen_direct(url):
+    return f"https://zenmarket.jp/pt/?url={url}"
 
 
 def translate(text):
@@ -136,47 +157,58 @@ def translate(text):
 
 async def run():
     while True:
+
+        # 🔥 SNIPER (rápido)
         for keyword in KEYWORDS:
-            try:
-                items = scrape_yahoo(keyword)
+            mercari_items = scrape_mercari(keyword)
 
-                for item in items:
-                    if item["id"] in seen:
-                        continue
+            for item in mercari_items:
+                if item["id"] in seen:
+                    continue
+                seen.add(item["id"])
 
-                    seen.add(item["id"])
+                title = translate(item["title"])[:60]
+                link = to_zen_direct(item["url"])
 
-                    title = translate(item["title"])[:60].upper()
-                    price = convert_price(item["price"])
-                    link = to_zen(item)
+                msg = f"""⚡ COMPRA IMEDIATA
 
-                    msg = f"""🔥 OPORTUNIDADE
+⌚ {title}
 
-🔍 {title}
+💰 BUY NOW
 
-💰 {price}
-⚡ Leilão
-
-🔗 Comprar:
-{link}
+🔗 {link}
 """
 
-                    if item["image"]:
-                        try:
-                            await bot.send_photo(
-                                chat_id=CHAT_ID,
-                                photo=item["image"],
-                                caption=msg
-                            )
-                        except:
-                            await bot.send_message(chat_id=CHAT_ID, text=msg)
-                    else:
-                        await bot.send_message(chat_id=CHAT_ID, text=msg)
+                await bot.send_message(chat_id=CHAT_ID, text=msg)
 
-                await asyncio.sleep(random.uniform(2, 4))
+        await asyncio.sleep(25)
 
-            except Exception as e:
-                print("erro:", e)
+        # 🔥 YAHOO (lento + filtrado)
+        for keyword in KEYWORDS:
+            yahoo_items = scrape_yahoo(keyword)
+
+            for item in yahoo_items:
+                if item["id"] in seen:
+                    continue
+                seen.add(item["id"])
+
+                title = translate(item["title"])[:60]
+                price = convert_price(item["price"])
+                link = to_zen_yahoo(item["id"])
+
+                msg = f"""🔥 LEILÃO TERMINANDO
+
+⌚ {title}
+
+💰 {price}
+
+🔗 {link}
+"""
+
+                if item["image"]:
+                    await bot.send_photo(chat_id=CHAT_ID, photo=item["image"], caption=msg)
+                else:
+                    await bot.send_message(chat_id=CHAT_ID, text=msg)
 
         await asyncio.sleep(90)
 
