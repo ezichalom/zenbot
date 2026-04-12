@@ -12,12 +12,23 @@ bot = Bot(token=TOKEN)
 seen = set()
 
 KEYWORDS = [
+    # BVLGARI
     "Bvlgari al38",
     "bvlgari aluminium al38",
     "bvlgari al38ta",
+    "bvlgari aluminium",
+    "ブルガリ アルミニウム",
+
+    # TAG
     "tag heuer formula 1 WAZ1110",
     "tag heuer formula 1 WAZ1112",
-    "tag heuer formula 1 CAZ1010"
+    "tag heuer formula 1 CAZ1010",
+    "tag heuer formula 1",
+    "タグホイヤー フォーミュラ1",
+
+    # CARTIER
+    "Cartier chronoscaph",
+    "カルティエ クロノスカフ"
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -62,7 +73,7 @@ def scrape_mercari(keyword):
     return items[:5]
 
 
-# -------- YAHOO --------
+# -------- YAHOO AUCTIONS --------
 def scrape_yahoo(keyword):
     url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}"
     soup = BeautifulSoup(requests.get(url, headers=HEADERS).text, "html.parser")
@@ -145,6 +156,7 @@ def translate(text):
         return text
 
 
+# -------- MAIN LOOP --------
 async def run():
     while True:
         for keyword in KEYWORDS:
@@ -194,5 +206,5 @@ async def run():
 
         await asyncio.sleep(30)
 
+
 asyncio.run(run())
-await bot.send_message(chat_id=CHAT_ID, text="TESTE MULTI MARKETPLACE 🚀")
