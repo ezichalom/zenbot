@@ -98,8 +98,7 @@ def fetch(url):
         if res.status_code == 200:
             return res.text
     except:
-        pass
-    return None
+        return None
 
 def fetch_zyte(url):
     try:
@@ -114,10 +113,10 @@ def fetch_zyte(url):
         return None
 
 # =========================
-# MERCARI
+# MERCARI SNIPER
 # =========================
-def scrape_mercari(keyword):
-    print("🔎 Mercari:", keyword)
+def scrape_mercari_sniper(keyword):
+    print("⚡ Sniper:", keyword)
 
     html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
     if not html:
@@ -138,7 +137,6 @@ def scrape_mercari(keyword):
                 continue
 
             price_jpy = parse_price(block)
-
             if not is_valid(title, price_jpy):
                 continue
 
@@ -154,11 +152,54 @@ def scrape_mercari(keyword):
         except:
             continue
 
-    print("✅ Mercari:", len(items))
+    print("✅ Sniper:", len(items))
     return items[:5]
 
 # =========================
-# YAHOO (ROBUSTO)
+# MERCARI SCANNER
+# =========================
+def scrape_mercari_scanner(keyword):
+    print("🧠 Scanner:", keyword)
+
+    html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=price&order=asc")
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    items = []
+
+    for a in soup.find_all("a", href=True):
+        if "/item/" not in a["href"]:
+            continue
+
+        try:
+            title = a.get_text(strip=True)
+            block = a.parent.get_text(" ", strip=True)
+
+            if "SOLD" in block or "売り切れ" in block:
+                continue
+
+            price_jpy = parse_price(block)
+            if not is_valid(title, price_jpy):
+                continue
+
+            item_id = a["href"].split("/")[-1]
+
+            items.append({
+                "id": "scan_" + item_id,
+                "title": title,
+                "price": convert_price(price_jpy),
+                "link": f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
+            })
+
+        except:
+            continue
+
+    print("✅ Scanner:", len(items))
+    return items[:3]
+
+# =========================
+# YAHOO
 # =========================
 def scrape_yahoo(keyword):
     print("🔥 Yahoo:", keyword)
@@ -179,19 +220,13 @@ def scrape_yahoo(keyword):
             title = title.get_text(strip=True)
             text = li.get_text()
 
-            # MAIS FLEXÍVEL (não perde tudo)
             if not any(x in text for x in ["日", "時間", "分"]):
                 continue
 
-            href = li.select_one("a")
-            if not href:
-                continue
-
-            href = href.get("href")
+            href = li.select_one("a").get("href")
             auction_id = href.split("/")[-1]
 
             price_jpy = parse_price(text)
-
             if not is_valid(title, price_jpy):
                 continue
 
@@ -221,69 +256,61 @@ def translate(text):
 # ENVIO
 # =========================
 async def send(msg):
-    await bot.send_message(
-        chat_id=CHAT_ID,
-        text=msg,
-        disable_web_page_preview=True
-    )
+    await bot.send_message(chat_id=CHAT_ID, text=msg, disable_web_page_preview=True)
 
 # =========================
 # LOOPS
 # =========================
-async def mercari_loop():
+async def mercari_sniper_loop():
     while True:
-
         if not zenmarket_online():
-            print("❌ ZenMarket OFF - pausando Mercari")
-            await asyncio.sleep(300)
+            print("❌ Zen OFF (sniper)")
+            await asyncio.sleep(3600)
             continue
 
         for keyword in KEYWORDS:
-            items = scrape_mercari(keyword)
-
+            items = scrape_mercari_sniper(keyword)
             for item in items:
                 if already_seen(item["id"]):
                     continue
-
                 mark_seen(item["id"])
+                await send(f"⚡ {translate(item['title'])[:60]}\n💰 {item['price']}\n{item['link']}")
 
-                msg = f"""⚡ COMPRA IMEDIATA
+        await asyncio.sleep(300)
 
-⌚ {translate(item['title'])[:60]}
-💰 {item['price']}
 
-🛒 {item['link']}
-"""
-                await send(msg)
+async def mercari_scanner_loop():
+    while True:
+        if not zenmarket_online():
+            print("❌ Zen OFF (scanner)")
+            await asyncio.sleep(3600)
+            continue
 
-        await asyncio.sleep(300)  # 5 min
+        for keyword in KEYWORDS:
+            items = scrape_mercari_scanner(keyword)
+            for item in items:
+                if already_seen(item["id"]):
+                    continue
+                mark_seen(item["id"])
+                await send(f"🧠 {translate(item['title'])[:60]}\n💰 {item['price']}\n{item['link']}")
+
+        await asyncio.sleep(10800)  # 3h
 
 
 async def yahoo_loop():
     while True:
-
         if not zenmarket_online():
-            print("❌ ZenMarket OFF - pausando Yahoo")
-            await asyncio.sleep(300)
+            print("❌ Zen OFF (yahoo)")
+            await asyncio.sleep(3600)
             continue
 
         for keyword in KEYWORDS:
             items = scrape_yahoo(keyword)
-
             for item in items:
                 if already_seen(item["id"]):
                     continue
-
                 mark_seen(item["id"])
-
-                msg = f"""🔥 LEILÃO
-
-⌚ {translate(item['title'])[:60]}
-💰 {item['price']}
-
-🛒 {item['link']}
-"""
-                await send(msg)
+                await send(f"🔥 {translate(item['title'])[:60]}\n💰 {item['price']}\n{item['link']}")
 
         await asyncio.sleep(60)
 
@@ -292,7 +319,8 @@ async def yahoo_loop():
 # =========================
 async def main():
     await asyncio.gather(
-        mercari_loop(),
+        mercari_sniper_loop(),
+        mercari_scanner_loop(),
         yahoo_loop()
     )
 
