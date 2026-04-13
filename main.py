@@ -13,7 +13,7 @@ ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
 
 bot = Bot(token=TOKEN)
 
-# 🔥 BANCO SQLITE
+# 🔥 BANCO
 conn = sqlite3.connect("seen.db")
 cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)")
@@ -27,63 +27,59 @@ def mark_seen(item_id):
     cursor.execute("INSERT OR IGNORE INTO seen (id) VALUES (?)", (item_id,))
     conn.commit()
 
-# 🔥 KEYWORDS
+# 🔥 CONFIG
+MAX_PRICE_BRL = 6800
+JPY_TO_BRL = 0.035
+
 KEYWORDS = [
     "tag heuer WAZ1110",
     "tag heuer WAZ1112",
     "tag heuer CAZ1010",
     "tag heuer formula 1",
-    "タグホイヤー フォーミュラ1",
-    "bvlgari scuba",
     "bvlgari aluminium AL38",
-    "ブルガリ アルミニウム",
     "AL38TA",
-    "Omega Speedmaster 3513.50",
-    "Omega Speedmaster 3513.30",
-    "オメガ スピードマスター",
+    "Omega Speedmaster 3513",
     "WAZ1110",
     "AL38"
 ]
 
 BAD_WORDS = ["belt", "strap", "ベルト", "band", "バンド", "部品"]
-GOOD_WORDS = ["watch", "時計", "automatic", "chronograph"]
 
-JPY_TO_BRL = 0.035
+# 💰 PARSE PREÇO (¥, $, CA$)
+def parse_price(text):
+    jpy = re.search(r"¥\s?([\d,]+)", text)
+    if jpy:
+        return int(jpy.group(1).replace(",", ""))
 
-def convert_price(price_text):
-    try:
-        value = int(re.sub(r"[^\d]", "", price_text))
-        brl = int(value * JPY_TO_BRL)
-        return value, f"¥{value:,} (~R$ {brl:,})"
-    except:
-        return None, price_text
+    cad = re.search(r"CA?\$?\s?([\d,]+)", text)
+    if cad:
+        return int(cad.group(1).replace(",", "")) * 110  # approx → JPY
 
-def score_item(title, price_value):
+    usd = re.search(r"\$\s?([\d,]+)", text)
+    if usd:
+        return int(usd.group(1).replace(",", "")) * 150  # approx → JPY
+
+    return None
+
+def convert_price(jpy):
+    if not jpy:
+        return "N/A"
+    brl = int(jpy * JPY_TO_BRL)
+    return f"¥{jpy:,} (~R$ {brl:,})"
+
+def is_valid(title, price_jpy):
     t = title.lower()
 
     if any(b in t for b in BAD_WORDS):
-        return "❌ IGNORAR"
+        return False
 
-    if price_value:
-        if price_value < 30000:
-            return "🔥 DEAL FORTE"
-        elif price_value < 80000:
-            return "⚠️ MÉDIO"
+    if not price_jpy:
+        return False
 
-    if any(g in t for g in GOOD_WORDS):
-        return "⚠️ MÉDIO"
+    brl = price_jpy * JPY_TO_BRL
+    return brl <= MAX_PRICE_BRL
 
-    return "❌ IGNORAR"
-
-def fetch(url):
-    try:
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200:
-            return res.text
-    except:
-        pass
-    return None
-
+# 🔴 ZYTE (apenas Mercari)
 def fetch_zyte(url):
     try:
         res = requests.post(
@@ -96,6 +92,16 @@ def fetch_zyte(url):
     except:
         return None
 
+# 🟢 Yahoo (GRÁTIS)
+def fetch(url):
+    try:
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
+            return res.text
+    except:
+        pass
+    return None
+
 # 🔥 MERCARI
 def scrape_mercari(keyword):
     html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
@@ -105,36 +111,27 @@ def scrape_mercari(keyword):
     soup = BeautifulSoup(html, "html.parser")
     items = []
 
-    for a in soup.find_all("a", href=True):
-        if "/item/" not in a["href"]:
+    for card in soup.find_all("a", href=True):
+        if "/item/" not in card["href"]:
             continue
 
         try:
-            title = a.get_text(strip=True)
+            title = card.get_text(strip=True)
             if not title:
                 continue
 
-            parent = a.parent
-            text = parent.get_text()
+            block = card.parent.get_text(" ", strip=True)
+            price_jpy = parse_price(block)
 
-            match = re.search(r"¥\s?[\d,]+", text)
-            if match:
-                raw = match.group()
-                value, price = convert_price(raw)
-            else:
-                value, price = None, "N/A"
-
-            score = score_item(title, value)
-            if score == "❌ IGNORAR":
+            if not is_valid(title, price_jpy):
                 continue
 
-            item_id = a["href"].split("/")[-1]
+            item_id = card["href"].split("/")[-1]
 
             items.append({
                 "id": "mercari_" + item_id,
                 "title": title,
-                "price": price,
-                "score": score,
+                "price": convert_price(price_jpy),
                 "link": f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
             })
 
@@ -163,19 +160,17 @@ def scrape_yahoo(keyword):
             auction_id = href.split("/")[-1]
 
             price_tag = li.select_one(".Product__priceValue")
-            price_text = price_tag.get_text(strip=True) if price_tag else "N/A"
+            price_text = price_tag.get_text(strip=True) if price_tag else ""
 
-            value, price = convert_price(price_text)
-            score = score_item(title, value)
+            price_jpy = parse_price(price_text)
 
-            if score == "❌ IGNORAR":
+            if not is_valid(title, price_jpy):
                 continue
 
             items.append({
                 "id": "yahoo_" + auction_id,
                 "title": title,
-                "price": price,
-                "score": score,
+                "price": convert_price(price_jpy),
                 "link": f"https://zenmarket.jp/pt/auction.aspx?itemCode={auction_id}"
             })
 
@@ -201,6 +196,7 @@ async def send(msg):
 async def run():
     while True:
 
+        # ⚡ MERCARI (SNIPER)
         for keyword in KEYWORDS:
             items = scrape_mercari(keyword)
 
@@ -212,7 +208,7 @@ async def run():
 
                 title = translate(item["title"])[:60]
 
-                msg = f"""{item['score']}
+                msg = f"""🔥 OPORTUNIDADE
 
 ⚡ COMPRA IMEDIATA
 ⌚ {title}
@@ -225,6 +221,7 @@ async def run():
 
         await asyncio.sleep(25)
 
+        # 🔥 YAHOO (GRÁTIS)
         for keyword in KEYWORDS:
             items = scrape_yahoo(keyword)
 
@@ -236,9 +233,8 @@ async def run():
 
                 title = translate(item["title"])[:60]
 
-                msg = f"""{item['score']}
+                msg = f"""🔥 LEILÃO
 
-🔥 LEILÃO TERMINANDO
 ⌚ {title}
 💰 {item['price']}
 
