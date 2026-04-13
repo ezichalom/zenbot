@@ -14,12 +14,22 @@ ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
 bot = Bot(token=TOKEN)
 seen = set()
 
+# 🔥 KEYWORDS CORRETAS
 KEYWORDS = [
     "tag heuer WAZ1110",
-    "bvlgari aluminium AL38",
-    "Omega Speedmaster 3513",
+    "tag heuer WAZ1112",
+    "tag heuer CAZ1010",
+    "tag heuer formula 1",
     "タグホイヤー フォーミュラ1",
+    "bvlgari scuba",
+    "bvlgari aluminium AL38",
     "ブルガリ アルミニウム",
+    "AL38TA",
+    "Omega Speedmaster 3513.50",
+    "Omega Speedmaster 3513.30",
+    "オメガ スピードマスター",
+    "WAZ1110",
+    "AL38"
 ]
 
 BAD_WORDS = [
@@ -31,7 +41,6 @@ BAD_WORDS = [
 JPY_TO_BRL = 0.035
 
 
-# 🔥 CONVERSÃO
 def convert_price(price_text):
     try:
         value = int(re.sub(r"[^\d]", "", price_text))
@@ -41,7 +50,7 @@ def convert_price(price_text):
         return price_text
 
 
-# 🟢 FETCH NORMAL (GRÁTIS → Yahoo)
+# 🟢 YAHOO (GRÁTIS)
 def fetch(url):
     try:
         res = requests.get(url, timeout=10)
@@ -52,7 +61,7 @@ def fetch(url):
     return None
 
 
-# 🔴 FETCH ZYTE (Mercari / Rakuma)
+# 🔴 ZYTE
 def fetch_zyte(url):
     try:
         res = requests.post(
@@ -61,13 +70,11 @@ def fetch_zyte(url):
             json={"url": url, "browserHtml": True},
             timeout=20
         )
-        data = res.json()
-        return data.get("browserHtml")
+        return res.json().get("browserHtml")
     except:
         return None
 
 
-# 🔥 YAHOO (GRÁTIS)
 def scrape_yahoo(keyword):
     url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&ei=UTF-8"
     html = fetch(url)
@@ -109,7 +116,6 @@ def scrape_yahoo(keyword):
     return items[:5]
 
 
-# 🔥 MERCARI (ZYTE)
 def scrape_mercari(keyword):
     url = f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc"
     html = fetch_zyte(url)
@@ -143,7 +149,6 @@ def scrape_mercari(keyword):
     return items[:5]
 
 
-# 🔥 RAKUMA (ZYTE)
 def scrape_rakuma(keyword):
     url = f"https://fril.jp/s?query={keyword}&sort=created_at_desc"
     html = fetch_zyte(url)
@@ -177,7 +182,6 @@ def scrape_rakuma(keyword):
     return items[:5]
 
 
-# 🔥 TRADUÇÃO
 def translate(text):
     try:
         return GoogleTranslator(source='auto', target='pt').translate(text)
@@ -185,11 +189,9 @@ def translate(text):
         return text
 
 
-# 🔥 LOOP PRINCIPAL
 async def run():
     while True:
 
-        # ⚡ SNIPER (Mercari + Rakuma)
         for keyword in KEYWORDS:
             items = []
             items += scrape_mercari(keyword)
@@ -216,7 +218,6 @@ async def run():
 
         await asyncio.sleep(25)
 
-        # 🔥 YAHOO (GRÁTIS)
         for keyword in KEYWORDS:
             items = scrape_yahoo(keyword)
 
