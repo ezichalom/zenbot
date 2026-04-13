@@ -30,7 +30,7 @@ def mark_seen(item_id):
     conn.commit()
 
 # =========================
-# ⚙️ CONFIG
+# CONFIG
 # =========================
 JPY_TO_BRL = 0.035
 
@@ -73,7 +73,7 @@ def convert_price(jpy):
     return jpy, f"¥{jpy:,} (~R$ {brl:,})"
 
 # =========================
-# 🧠 FILTRO POR MARCA
+# FILTRO MARCA
 # =========================
 def is_valid(title, price_jpy):
     t = title.lower()
@@ -86,15 +86,12 @@ def is_valid(title, price_jpy):
 
     brl = price_jpy * JPY_TO_BRL
 
-    # 🔥 TAG HEUER
     if "tag heuer" in t or "タグホイヤー" in t:
         return brl <= 4500
 
-    # 🔥 BVLGARI
     if "bvlgari" in t or "ブルガリ" in t:
         return brl <= 4100
 
-    # 🔥 OUTROS
     return brl <= 6800
 
 # =========================
@@ -113,7 +110,29 @@ def fetch_zyte(url):
         return None
 
 # =========================
-# 🧠 VALIDAÇÃO ZEN
+# 🔥 VALIDAÇÃO MERCARI (NOVA)
+# =========================
+def is_available_mercari(item_id):
+    try:
+        url = f"https://jp.mercari.com/item/{item_id}"
+        html = fetch_zyte(url)
+
+        if not html:
+            return False
+
+        text = html.lower()
+
+        if any(word in text for word in [
+            "sold", "売り切れ", "売切", "在庫なし"
+        ]):
+            return False
+
+        return True
+    except:
+        return False
+
+# =========================
+# 🔥 VALIDAÇÃO ZEN (extra)
 # =========================
 def is_available_zen(link):
     try:
@@ -160,8 +179,13 @@ def scrape_mercari(keyword):
 
             item_id = card["href"].split("/")[-1]
 
+            # 🔥 VALIDAÇÃO REAL (MERCARI PRIMEIRO)
+            if not is_available_mercari(item_id):
+                continue
+
             link = f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
 
+            # 🔥 VALIDAÇÃO EXTRA
             if not is_available_zen(link):
                 continue
 
@@ -180,7 +204,7 @@ def scrape_mercari(keyword):
     return items[:5]
 
 # =========================
-# 🌎 TRADUÇÃO
+# TRADUÇÃO
 # =========================
 def translate(text):
     try:
@@ -189,7 +213,7 @@ def translate(text):
         return text
 
 # =========================
-# 📤 ENVIO
+# ENVIO
 # =========================
 async def send(msg):
     await bot.send_message(
@@ -199,7 +223,7 @@ async def send(msg):
     )
 
 # =========================
-# 🚀 LOOP
+# LOOP
 # =========================
 async def run():
     while True:
