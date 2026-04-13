@@ -30,9 +30,8 @@ def mark_seen(item_id):
     conn.commit()
 
 # =========================
-# CONFIG
+# ⚙️ CONFIG
 # =========================
-MAX_PRICE_BRL = 6800
 JPY_TO_BRL = 0.035
 
 KEYWORDS = [
@@ -71,8 +70,11 @@ def convert_price(jpy):
     if not jpy:
         return "N/A"
     brl = int(jpy * JPY_TO_BRL)
-    return f"¥{jpy:,} (~R$ {brl:,})"
+    return jpy, f"¥{jpy:,} (~R$ {brl:,})"
 
+# =========================
+# 🧠 FILTRO POR MARCA
+# =========================
 def is_valid(title, price_jpy):
     t = title.lower()
 
@@ -83,7 +85,17 @@ def is_valid(title, price_jpy):
         return False
 
     brl = price_jpy * JPY_TO_BRL
-    return brl <= MAX_PRICE_BRL
+
+    # 🔥 TAG HEUER
+    if "tag heuer" in t or "タグホイヤー" in t:
+        return brl <= 4500
+
+    # 🔥 BVLGARI
+    if "bvlgari" in t or "ブルガリ" in t:
+        return brl <= 4100
+
+    # 🔥 OUTROS
+    return brl <= 6800
 
 # =========================
 # 🔴 ZYTE
@@ -101,7 +113,7 @@ def fetch_zyte(url):
         return None
 
 # =========================
-# 🧠 VALIDAÇÃO REAL (ZENMARKET)
+# 🧠 VALIDAÇÃO ZEN
 # =========================
 def is_available_zen(link):
     try:
@@ -150,14 +162,15 @@ def scrape_mercari(keyword):
 
             link = f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
 
-            # 🔥 VALIDAÇÃO FINAL
             if not is_available_zen(link):
                 continue
+
+            _, price = convert_price(price_jpy)
 
             items.append({
                 "id": "mercari_" + item_id,
                 "title": title,
-                "price": convert_price(price_jpy),
+                "price": price,
                 "link": link
             })
 
@@ -167,7 +180,7 @@ def scrape_mercari(keyword):
     return items[:5]
 
 # =========================
-# TRADUÇÃO
+# 🌎 TRADUÇÃO
 # =========================
 def translate(text):
     try:
@@ -176,7 +189,7 @@ def translate(text):
         return text
 
 # =========================
-# ENVIO
+# 📤 ENVIO
 # =========================
 async def send(msg):
     await bot.send_message(
@@ -186,7 +199,7 @@ async def send(msg):
     )
 
 # =========================
-# LOOP
+# 🚀 LOOP
 # =========================
 async def run():
     while True:
