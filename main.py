@@ -110,14 +110,13 @@ def fetch_zyte(url):
         return None
 
 # =========================
-# MERCARI
+# MERCARI (1H)
 # =========================
 def scrape_mercari(keyword):
     print("🔎 Mercari:", keyword)
 
     html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
     if not html:
-        print("❌ Zyte falhou")
         return []
 
     soup = BeautifulSoup(html, "html.parser")
@@ -129,9 +128,6 @@ def scrape_mercari(keyword):
 
         try:
             title = a.get_text(strip=True)
-            if not title:
-                continue
-
             block = a.parent.get_text(" ", strip=True)
 
             if "SOLD" in block or "売り切れ" in block:
@@ -158,14 +154,13 @@ def scrape_mercari(keyword):
     return items[:5]
 
 # =========================
-# YAHOO
+# YAHOO (<12H)
 # =========================
 def scrape_yahoo(keyword):
     print("🔥 Yahoo:", keyword)
 
     html = fetch(f"https://auctions.yahoo.co.jp/search/search?p={keyword}")
     if not html:
-        print("❌ Yahoo falhou")
         return []
 
     soup = BeautifulSoup(html, "html.parser")
@@ -173,15 +168,18 @@ def scrape_yahoo(keyword):
 
     for li in soup.select("li.Product"):
         try:
-            title = li.select_one("h3").get_text(strip=True)
+            text = li.get_text()
 
-            if not ("1日" in li.text or "時間" in li.text):
+            # 🔥 FILTRO < 12H
+            if not any(x in text for x in ["時間", "分"]):
                 continue
+
+            title = li.select_one("h3").get_text(strip=True)
 
             href = li.select_one("a").get("href")
             auction_id = href.split("/")[-1]
 
-            price_jpy = parse_price(li.text)
+            price_jpy = parse_price(text)
 
             if not is_valid(title, price_jpy):
                 continue
@@ -219,17 +217,14 @@ async def send(msg):
     )
 
 # =========================
-# LOOP INTERCALADO (FIX)
+# LOOP SEPARADO
 # =========================
-async def run():
+async def mercari_loop():
     while True:
-
         for keyword in KEYWORDS:
+            items = scrape_mercari(keyword)
 
-            # MERCARI
-            items_m = scrape_mercari(keyword)
-
-            for item in items_m:
+            for item in items:
                 if already_seen(item["id"]):
                     continue
 
@@ -246,10 +241,16 @@ async def run():
 """
                 await send(msg)
 
-            # YAHOO (AGORA RODA SEMPRE)
-            items_y = scrape_yahoo(keyword)
+        print("⏱️ Esperando 1 hora (Mercari)")
+        await asyncio.sleep(3600)
 
-            for item in items_y:
+
+async def yahoo_loop():
+    while True:
+        for keyword in KEYWORDS:
+            items = scrape_yahoo(keyword)
+
+            for item in items:
                 if already_seen(item["id"]):
                     continue
 
@@ -257,7 +258,7 @@ async def run():
 
                 title = translate(item["title"])[:60]
 
-                msg = f"""🔥 LEILÃO
+                msg = f"""🔥 LEILÃO (<12H)
 
 ⌚ {title}
 💰 {item['price']}
@@ -266,8 +267,15 @@ async def run():
 """
                 await send(msg)
 
-            await asyncio.sleep(5)
+        await asyncio.sleep(60)
 
-        await asyncio.sleep(20)
+# =========================
+# MAIN
+# =========================
+async def main():
+    await asyncio.gather(
+        mercari_loop(),
+        yahoo_loop()
+    )
 
-asyncio.run(run())
+asyncio.run(main())
