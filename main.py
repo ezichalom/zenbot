@@ -35,24 +35,9 @@ def mark_seen(item_id):
 JPY_TO_BRL = 0.035
 
 KEYWORDS = [
-    # TAG
-    "tag heuer",
-    "タグホイヤー",
-    "WAZ1110",
-    "WAZ1112",
-    "CAZ1010",
-
-    # BVLGARI
-    "bvlgari",
-    "ブルガリ",
-    "al38",
-    "al38ta",
-    "aluminium",
-
-    # OMEGA
-    "omega speedmaster",
-    "オメガ スピードマスター",
-    "3513"
+    "tag heuer", "タグホイヤー", "WAZ1110", "WAZ1112", "CAZ1010",
+    "bvlgari", "ブルガリ", "al38", "al38ta",
+    "omega", "オメガ", "speedmaster", "3513"
 ]
 
 BAD_WORDS = ["belt", "strap", "ベルト", "band", "バンド", "部品"]
@@ -95,6 +80,16 @@ def is_valid(title, price_jpy):
     return brl <= 6800
 
 # =========================
+# CHECK ZENMARKET
+# =========================
+def zenmarket_online():
+    try:
+        res = requests.get("https://zenmarket.jp", timeout=5)
+        return res.status_code == 200
+    except:
+        return False
+
+# =========================
 # FETCH
 # =========================
 def fetch(url):
@@ -126,7 +121,6 @@ def scrape_mercari(keyword):
 
     html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
     if not html:
-        print("❌ Zyte falhou")
         return []
 
     soup = BeautifulSoup(html, "html.parser")
@@ -138,9 +132,6 @@ def scrape_mercari(keyword):
 
         try:
             title = a.get_text(strip=True)
-            if not title:
-                continue
-
             block = a.parent.get_text(" ", strip=True)
 
             if "SOLD" in block or "売り切れ" in block:
@@ -163,18 +154,17 @@ def scrape_mercari(keyword):
         except:
             continue
 
-    print("✅ Mercari encontrados:", len(items))
+    print("✅ Mercari:", len(items))
     return items[:5]
 
 # =========================
-# YAHOO
+# YAHOO (ROBUSTO)
 # =========================
 def scrape_yahoo(keyword):
     print("🔥 Yahoo:", keyword)
 
     html = fetch(f"https://auctions.yahoo.co.jp/search/search?p={keyword}")
     if not html:
-        print("❌ Yahoo falhou")
         return []
 
     soup = BeautifulSoup(html, "html.parser")
@@ -182,15 +172,22 @@ def scrape_yahoo(keyword):
 
     for li in soup.select("li.Product"):
         try:
+            title = li.select_one("h3")
+            if not title:
+                continue
+
+            title = title.get_text(strip=True)
             text = li.get_text()
 
-            # 🔥 <12H (incluindo dias agora)
+            # MAIS FLEXÍVEL (não perde tudo)
             if not any(x in text for x in ["日", "時間", "分"]):
                 continue
 
-            title = li.select_one("h3").get_text(strip=True)
+            href = li.select_one("a")
+            if not href:
+                continue
 
-            href = li.select_one("a").get("href")
+            href = href.get("href")
             auction_id = href.split("/")[-1]
 
             price_jpy = parse_price(text)
@@ -208,7 +205,7 @@ def scrape_yahoo(keyword):
         except:
             continue
 
-    print("✅ Yahoo encontrados:", len(items))
+    print("✅ Yahoo:", len(items))
     return items[:5]
 
 # =========================
@@ -235,6 +232,12 @@ async def send(msg):
 # =========================
 async def mercari_loop():
     while True:
+
+        if not zenmarket_online():
+            print("❌ ZenMarket OFF - pausando Mercari")
+            await asyncio.sleep(300)
+            continue
+
         for keyword in KEYWORDS:
             items = scrape_mercari(keyword)
 
@@ -244,23 +247,26 @@ async def mercari_loop():
 
                 mark_seen(item["id"])
 
-                title = translate(item["title"])[:60]
-
                 msg = f"""⚡ COMPRA IMEDIATA
 
-⌚ {title}
+⌚ {translate(item['title'])[:60]}
 💰 {item['price']}
 
 🛒 {item['link']}
 """
                 await send(msg)
 
-        print("⏱️ Esperando 5 minutos (Mercari)")
-        await asyncio.sleep(300)
+        await asyncio.sleep(300)  # 5 min
 
 
 async def yahoo_loop():
     while True:
+
+        if not zenmarket_online():
+            print("❌ ZenMarket OFF - pausando Yahoo")
+            await asyncio.sleep(300)
+            continue
+
         for keyword in KEYWORDS:
             items = scrape_yahoo(keyword)
 
@@ -270,11 +276,9 @@ async def yahoo_loop():
 
                 mark_seen(item["id"])
 
-                title = translate(item["title"])[:60]
+                msg = f"""🔥 LEILÃO
 
-                msg = f"""🔥 LEILÃO (<12H)
-
-⌚ {title}
+⌚ {translate(item['title'])[:60]}
 💰 {item['price']}
 
 🛒 {item['link']}
