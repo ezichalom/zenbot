@@ -36,19 +36,43 @@ BAD_WORDS = [
     "部品", "parts",
 ]
 
+GOOD_WORDS = [
+    "watch", "時計", "automatic", "chronograph"
+]
+
 JPY_TO_BRL = 0.035
 
 
+# 💰 conversão
 def convert_price(price_text):
     try:
         value = int(re.sub(r"[^\d]", "", price_text))
         brl = int(value * JPY_TO_BRL)
-        return f"¥{value:,} (~R$ {brl:,})"
+        return value, f"¥{value:,} (~R$ {brl:,})"
     except:
-        return price_text
+        return None, price_text
 
 
-# 🟢 Yahoo grátis
+# 🧠 score de oportunidade
+def score_item(title, price_value):
+    title_lower = title.lower()
+
+    if any(b in title_lower for b in BAD_WORDS):
+        return "❌ IGNORAR"
+
+    if price_value:
+        if price_value < 30000:
+            return "🔥 DEAL FORTE"
+        elif price_value < 80000:
+            return "⚠️ MÉDIO"
+
+    if any(g in title_lower for g in GOOD_WORDS):
+        return "⚠️ MÉDIO"
+
+    return "❌ IGNORAR"
+
+
+# 🟢 Yahoo
 def fetch(url):
     try:
         res = requests.get(url, timeout=10)
@@ -75,8 +99,7 @@ def fetch_zyte(url):
 
 # 🔥 Yahoo
 def scrape_yahoo(keyword):
-    url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}"
-    html = fetch(url)
+    html = fetch(f"https://auctions.yahoo.co.jp/search/search?p={keyword}")
 
     if not html:
         return []
@@ -88,22 +111,26 @@ def scrape_yahoo(keyword):
         try:
             title = li.select_one("h3").get_text(strip=True)
 
-            if any(b.lower() in title.lower() for b in BAD_WORDS):
-                continue
-
             if not ("1日" in li.text or "時間" in li.text):
                 continue
 
             href = li.select_one("a").get("href")
             auction_id = href.split("/")[-1]
 
-            price = li.select_one(".Product__priceValue")
-            price = price.get_text(strip=True) if price else "N/A"
+            price_tag = li.select_one(".Product__priceValue")
+            price_text = price_tag.get_text(strip=True) if price_tag else "N/A"
+
+            value, price = convert_price(price_text)
+            score = score_item(title, value)
+
+            if score == "❌ IGNORAR":
+                continue
 
             items.append({
                 "id": "yahoo_" + auction_id,
                 "title": title,
                 "price": price,
+                "score": score,
                 "link": f"https://zenmarket.jp/pt/auction.aspx?itemCode={auction_id}"
             })
 
@@ -113,10 +140,9 @@ def scrape_yahoo(keyword):
     return items[:5]
 
 
-# 🔥 Mercari
+# 🔥 Mercari (corrigido)
 def scrape_mercari(keyword):
-    url = f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc"
-    html = fetch_zyte(url)
+    html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
 
     if not html:
         return []
@@ -133,16 +159,18 @@ def scrape_mercari(keyword):
             if not title:
                 continue
 
-            if any(b.lower() in title.lower() for b in BAD_WORDS):
-                continue
-
             item_id = a["href"].split("/")[-1]
+
+            score = score_item(title, None)
+            if score == "❌ IGNORAR":
+                continue
 
             items.append({
                 "id": "mercari_" + item_id,
                 "title": title,
                 "price": "Buy Now",
-                "link": f"https://zenmarket.jp/pt/?url=https://jp.mercari.com{a['href']}"
+                "score": score,
+                "link": f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
             })
 
         except:
@@ -153,8 +181,7 @@ def scrape_mercari(keyword):
 
 # 🔥 Rakuma
 def scrape_rakuma(keyword):
-    url = f"https://fril.jp/s?query={keyword}&sort=created_at_desc"
-    html = fetch_zyte(url)
+    html = fetch_zyte(f"https://fril.jp/s?query={keyword}&sort=created_at_desc")
 
     if not html:
         return []
@@ -171,15 +198,17 @@ def scrape_rakuma(keyword):
             if not title:
                 continue
 
-            if any(b.lower() in title.lower() for b in BAD_WORDS):
-                continue
-
             item_id = a["href"].split("/")[-1]
+
+            score = score_item(title, None)
+            if score == "❌ IGNORAR":
+                continue
 
             items.append({
                 "id": "rakuma_" + item_id,
                 "title": title,
                 "price": "Buy Now",
+                "score": score,
                 "link": f"https://zenmarket.jp/pt/?url=https://fril.jp{a['href']}"
             })
 
@@ -189,42 +218,7 @@ def scrape_rakuma(keyword):
     return items[:5]
 
 
-# 🔥 Rakuten (novo)
-def scrape_rakuten(keyword):
-    url = f"https://search.rakuten.co.jp/search/mall/{keyword}/"
-    html = fetch_zyte(url)
-
-    if not html:
-        return []
-
-    soup = BeautifulSoup(html, "html.parser")
-    items = []
-
-    for a in soup.find_all("a", href=True):
-        if "rakuten.co.jp" not in a["href"]:
-            continue
-
-        try:
-            title = a.get_text(strip=True)
-            if len(title) < 20:
-                continue
-
-            if any(b.lower() in title.lower() for b in BAD_WORDS):
-                continue
-
-            items.append({
-                "id": "rakuten_" + a["href"],
-                "title": title,
-                "price": "Store Price",
-                "link": f"https://zenmarket.jp/pt/?url={a['href']}"
-            })
-
-        except:
-            continue
-
-    return items[:3]  # menos spam
-
-
+# 🔥 tradução
 def translate(text):
     try:
         return GoogleTranslator(source='auto', target='pt').translate(text)
@@ -232,6 +226,7 @@ def translate(text):
         return text
 
 
+# 🚀 LOOP
 async def run():
     while True:
 
@@ -240,7 +235,6 @@ async def run():
             items = []
             items += scrape_mercari(keyword)
             items += scrape_rakuma(keyword)
-            items += scrape_rakuten(keyword)
 
             for item in items:
                 if item["id"] in seen:
@@ -250,7 +244,9 @@ async def run():
 
                 title = translate(item["title"])[:60]
 
-                msg = f"""⚡ COMPRA IMEDIATA
+                msg = f"""{item['score']}
+
+⚡ COMPRA IMEDIATA
 
 ⌚ {title}
 
@@ -261,7 +257,7 @@ async def run():
 
                 await bot.send_message(chat_id=CHAT_ID, text=msg)
 
-        await asyncio.sleep(30)
+        await asyncio.sleep(25)
 
         # 🔥 LEILÃO
         for keyword in KEYWORDS:
@@ -274,13 +270,14 @@ async def run():
                 seen.add(item["id"])
 
                 title = translate(item["title"])[:60]
-                price = convert_price(item["price"])
 
-                msg = f"""🔥 LEILÃO TERMINANDO
+                msg = f"""{item['score']}
+
+🔥 LEILÃO TERMINANDO
 
 ⌚ {title}
 
-💰 {price}
+💰 {item['price']}
 
 🔗 {item['link']}
 """
