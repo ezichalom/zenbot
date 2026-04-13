@@ -56,24 +56,16 @@ def parse_price(text):
     if jpy:
         return int(jpy.group(1).replace(",", ""))
 
-    cad = re.search(r"CA?\$?\s?([\d,]+)", text)
-    if cad:
-        return int(cad.group(1).replace(",", "")) * 110
-
-    usd = re.search(r"\$\s?([\d,]+)", text)
-    if usd:
-        return int(usd.group(1).replace(",", "")) * 150
-
     return None
 
 def convert_price(jpy):
     if not jpy:
         return "N/A"
     brl = int(jpy * JPY_TO_BRL)
-    return jpy, f"¥{jpy:,} (~R$ {brl:,})"
+    return f"¥{jpy:,} (~R$ {brl:,})"
 
 # =========================
-# FILTRO MARCA
+# 🎯 FILTRO POR MARCA
 # =========================
 def is_valid(title, price_jpy):
     t = title.lower()
@@ -95,8 +87,17 @@ def is_valid(title, price_jpy):
     return brl <= 6800
 
 # =========================
-# 🔴 ZYTE
+# FETCH
 # =========================
+def fetch(url):
+    try:
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
+            return res.text
+    except:
+        pass
+    return None
+
 def fetch_zyte(url):
     try:
         res = requests.post(
@@ -110,21 +111,17 @@ def fetch_zyte(url):
         return None
 
 # =========================
-# 🔥 VALIDAÇÃO MERCARI (NOVA)
+# 🔥 VALIDAÇÃO MERCARI (LENTA MAS BOA)
 # =========================
 def is_available_mercari(item_id):
     try:
-        url = f"https://jp.mercari.com/item/{item_id}"
-        html = fetch_zyte(url)
-
+        html = fetch_zyte(f"https://jp.mercari.com/item/{item_id}")
         if not html:
             return False
 
         text = html.lower()
 
-        if any(word in text for word in [
-            "sold", "売り切れ", "売切", "在庫なし"
-        ]):
+        if any(word in text for word in ["sold", "売り切れ", "売切", "在庫なし"]):
             return False
 
         return True
@@ -132,26 +129,10 @@ def is_available_mercari(item_id):
         return False
 
 # =========================
-# 🔥 VALIDAÇÃO ZEN (extra)
-# =========================
-def is_available_zen(link):
-    try:
-        res = requests.get(link, timeout=10)
-        text = res.text.lower()
-
-        if "fora de estoque" in text or "out of stock" in text:
-            return False
-
-        return True
-    except:
-        return False
-
-# =========================
-# 🔥 MERCARI
+# 🔥 MERCARI (VALIDAÇÃO FORTE)
 # =========================
 def scrape_mercari(keyword):
     html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
-
     if not html:
         return []
 
@@ -179,23 +160,53 @@ def scrape_mercari(keyword):
 
             item_id = card["href"].split("/")[-1]
 
-            # 🔥 VALIDAÇÃO REAL (MERCARI PRIMEIRO)
+            # 🔥 validação lenta
             if not is_available_mercari(item_id):
                 continue
-
-            link = f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
-
-            # 🔥 VALIDAÇÃO EXTRA
-            if not is_available_zen(link):
-                continue
-
-            _, price = convert_price(price_jpy)
 
             items.append({
                 "id": "mercari_" + item_id,
                 "title": title,
-                "price": price,
-                "link": link
+                "price": convert_price(price_jpy),
+                "link": f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
+            })
+
+        except:
+            continue
+
+    return items[:5]
+
+# =========================
+# 🔥 YAHOO (RÁPIDO)
+# =========================
+def scrape_yahoo(keyword):
+    html = fetch(f"https://auctions.yahoo.co.jp/search/search?p={keyword}")
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    items = []
+
+    for li in soup.select("li.Product"):
+        try:
+            title = li.select_one("h3").get_text(strip=True)
+
+            if not ("1日" in li.text or "時間" in li.text):
+                continue
+
+            href = li.select_one("a").get("href")
+            auction_id = href.split("/")[-1]
+
+            price_jpy = parse_price(li.text)
+
+            if not is_valid(title, price_jpy):
+                continue
+
+            items.append({
+                "id": "yahoo_" + auction_id,
+                "title": title,
+                "price": convert_price(price_jpy),
+                "link": f"https://zenmarket.jp/pt/auction.aspx?itemCode={auction_id}"
             })
 
         except:
@@ -228,6 +239,7 @@ async def send(msg):
 async def run():
     while True:
 
+        # ⚡ MERCARI (lento mas preciso)
         for keyword in KEYWORDS:
             items = scrape_mercari(keyword)
 
@@ -239,7 +251,7 @@ async def run():
 
                 title = translate(item["title"])[:60]
 
-                msg = f"""🔥 OPORTUNIDADE REAL
+                msg = f"""⚡ COMPRA IMEDIATA
 
 ⌚ {title}
 💰 {item['price']}
@@ -249,6 +261,30 @@ async def run():
 
                 await send(msg)
 
-        await asyncio.sleep(25)
+        await asyncio.sleep(30)
+
+        # 🔥 YAHOO (rápido)
+        for keyword in KEYWORDS:
+            items = scrape_yahoo(keyword)
+
+            for item in items:
+                if already_seen(item["id"]):
+                    continue
+
+                mark_seen(item["id"])
+
+                title = translate(item["title"])[:60]
+
+                msg = f"""🔥 LEILÃO
+
+⌚ {title}
+💰 {item['price']}
+
+🛒 {item['link']}
+"""
+
+                await send(msg)
+
+        await asyncio.sleep(60)
 
 asyncio.run(run())
