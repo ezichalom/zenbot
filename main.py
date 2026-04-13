@@ -36,14 +36,11 @@ BAD_WORDS = [
     "部品", "parts",
 ]
 
-GOOD_WORDS = [
-    "watch", "時計", "automatic", "chronograph"
-]
+GOOD_WORDS = ["watch", "時計", "automatic", "chronograph"]
 
 JPY_TO_BRL = 0.035
 
 
-# 💰 conversão
 def convert_price(price_text):
     try:
         value = int(re.sub(r"[^\d]", "", price_text))
@@ -53,7 +50,6 @@ def convert_price(price_text):
         return None, price_text
 
 
-# 🧠 score de oportunidade
 def score_item(title, price_value):
     title_lower = title.lower()
 
@@ -72,7 +68,6 @@ def score_item(title, price_value):
     return "❌ IGNORAR"
 
 
-# 🟢 Yahoo
 def fetch(url):
     try:
         res = requests.get(url, timeout=10)
@@ -83,7 +78,6 @@ def fetch(url):
     return None
 
 
-# 🔴 Zyte
 def fetch_zyte(url):
     try:
         res = requests.post(
@@ -97,10 +91,82 @@ def fetch_zyte(url):
         return None
 
 
-# 🔥 Yahoo
+def scrape_mercari(keyword):
+    html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    items = []
+
+    for a in soup.find_all("a", href=True):
+        if "/item/" not in a["href"]:
+            continue
+
+        try:
+            title = a.get_text(strip=True)
+            if not title:
+                continue
+
+            item_id = a["href"].split("/")[-1]
+
+            score = score_item(title, None)
+            if score == "❌ IGNORAR":
+                continue
+
+            items.append({
+                "id": "mercari_" + item_id,
+                "title": title,
+                "price": "Buy Now",
+                "score": score,
+                "link": f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
+            })
+
+        except:
+            continue
+
+    return items[:5]
+
+
+def scrape_rakuma(keyword):
+    html = fetch_zyte(f"https://fril.jp/s?query={keyword}&sort=created_at_desc")
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    items = []
+
+    for a in soup.find_all("a", href=True):
+        if "/item/" not in a["href"]:
+            continue
+
+        try:
+            title = a.get_text(strip=True)
+            if not title:
+                continue
+
+            item_id = a["href"].split("/")[-1]
+
+            score = score_item(title, None)
+            if score == "❌ IGNORAR":
+                continue
+
+            items.append({
+                "id": "rakuma_" + item_id,
+                "title": title,
+                "price": "Buy Now",
+                "score": score,
+                "link": f"https://zenmarket.jp/pt/?url=https://fril.jp{a['href']}"
+            })
+
+        except:
+            continue
+
+    return items[:5]
+
+
 def scrape_yahoo(keyword):
     html = fetch(f"https://auctions.yahoo.co.jp/search/search?p={keyword}")
-
     if not html:
         return []
 
@@ -140,85 +206,6 @@ def scrape_yahoo(keyword):
     return items[:5]
 
 
-# 🔥 Mercari (corrigido)
-def scrape_mercari(keyword):
-    html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
-
-    if not html:
-        return []
-
-    soup = BeautifulSoup(html, "html.parser")
-    items = []
-
-    for a in soup.find_all("a", href=True):
-        if "/item/" not in a["href"]:
-            continue
-
-        try:
-            title = a.get_text(strip=True)
-            if not title:
-                continue
-
-            item_id = a["href"].split("/")[-1]
-
-            score = score_item(title, None)
-            if score == "❌ IGNORAR":
-                continue
-
-            items.append({
-                "id": "mercari_" + item_id,
-                "title": title,
-                "price": "Buy Now",
-                "score": score,
-                "link": f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
-            })
-
-        except:
-            continue
-
-    return items[:5]
-
-
-# 🔥 Rakuma
-def scrape_rakuma(keyword):
-    html = fetch_zyte(f"https://fril.jp/s?query={keyword}&sort=created_at_desc")
-
-    if not html:
-        return []
-
-    soup = BeautifulSoup(html, "html.parser")
-    items = []
-
-    for a in soup.find_all("a", href=True):
-        if "/item/" not in a["href"]:
-            continue
-
-        try:
-            title = a.get_text(strip=True)
-            if not title:
-                continue
-
-            item_id = a["href"].split("/")[-1]
-
-            score = score_item(title, None)
-            if score == "❌ IGNORAR":
-                continue
-
-            items.append({
-                "id": "rakuma_" + item_id,
-                "title": title,
-                "price": "Buy Now",
-                "score": score,
-                "link": f"https://zenmarket.jp/pt/?url=https://fril.jp{a['href']}"
-            })
-
-        except:
-            continue
-
-    return items[:5]
-
-
-# 🔥 tradução
 def translate(text):
     try:
         return GoogleTranslator(source='auto', target='pt').translate(text)
@@ -226,15 +213,19 @@ def translate(text):
         return text
 
 
-# 🚀 LOOP
+async def send(msg):
+    await bot.send_message(
+        chat_id=CHAT_ID,
+        text=msg,
+        disable_web_page_preview=True
+    )
+
+
 async def run():
     while True:
 
-        # ⚡ SNIPER
         for keyword in KEYWORDS:
-            items = []
-            items += scrape_mercari(keyword)
-            items += scrape_rakuma(keyword)
+            items = scrape_mercari(keyword) + scrape_rakuma(keyword)
 
             for item in items:
                 if item["id"] in seen:
@@ -247,19 +238,16 @@ async def run():
                 msg = f"""{item['score']}
 
 ⚡ COMPRA IMEDIATA
-
 ⌚ {title}
-
 💰 {item['price']}
 
 🔗 {item['link']}
 """
 
-                await bot.send_message(chat_id=CHAT_ID, text=msg)
+                await send(msg)
 
         await asyncio.sleep(25)
 
-        # 🔥 LEILÃO
         for keyword in KEYWORDS:
             items = scrape_yahoo(keyword)
 
@@ -274,15 +262,13 @@ async def run():
                 msg = f"""{item['score']}
 
 🔥 LEILÃO TERMINANDO
-
 ⌚ {title}
-
 💰 {item['price']}
 
 🔗 {item['link']}
 """
 
-                await bot.send_message(chat_id=CHAT_ID, text=msg)
+                await send(msg)
 
         await asyncio.sleep(90)
 
