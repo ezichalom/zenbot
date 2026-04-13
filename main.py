@@ -13,7 +13,9 @@ ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
 
 bot = Bot(token=TOKEN)
 
-# 🔥 BANCO
+# =========================
+# 🧠 BANCO SQLITE
+# =========================
 conn = sqlite3.connect("seen.db")
 cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)")
@@ -27,7 +29,9 @@ def mark_seen(item_id):
     cursor.execute("INSERT OR IGNORE INTO seen (id) VALUES (?)", (item_id,))
     conn.commit()
 
-# 🔥 CONFIG
+# =========================
+# ⚙️ CONFIG
+# =========================
 MAX_PRICE_BRL = 6800
 JPY_TO_BRL = 0.035
 
@@ -45,7 +49,9 @@ KEYWORDS = [
 
 BAD_WORDS = ["belt", "strap", "ベルト", "band", "バンド", "部品"]
 
-# 💰 PARSE PREÇO (¥, $, CA$)
+# =========================
+# 💰 PREÇO
+# =========================
 def parse_price(text):
     jpy = re.search(r"¥\s?([\d,]+)", text)
     if jpy:
@@ -53,11 +59,11 @@ def parse_price(text):
 
     cad = re.search(r"CA?\$?\s?([\d,]+)", text)
     if cad:
-        return int(cad.group(1).replace(",", "")) * 110  # approx → JPY
+        return int(cad.group(1).replace(",", "")) * 110
 
     usd = re.search(r"\$\s?([\d,]+)", text)
     if usd:
-        return int(usd.group(1).replace(",", "")) * 150  # approx → JPY
+        return int(usd.group(1).replace(",", "")) * 150
 
     return None
 
@@ -79,7 +85,18 @@ def is_valid(title, price_jpy):
     brl = price_jpy * JPY_TO_BRL
     return brl <= MAX_PRICE_BRL
 
-# 🔴 ZYTE (apenas Mercari)
+# =========================
+# 🌐 FETCH
+# =========================
+def fetch(url):
+    try:
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
+            return res.text
+    except:
+        pass
+    return None
+
 def fetch_zyte(url):
     try:
         res = requests.post(
@@ -92,19 +109,12 @@ def fetch_zyte(url):
     except:
         return None
 
-# 🟢 Yahoo (GRÁTIS)
-def fetch(url):
-    try:
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200:
-            return res.text
-    except:
-        pass
-    return None
-
+# =========================
 # 🔥 MERCARI
+# =========================
 def scrape_mercari(keyword):
     html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
+
     if not html:
         return []
 
@@ -121,6 +131,11 @@ def scrape_mercari(keyword):
                 continue
 
             block = card.parent.get_text(" ", strip=True)
+
+            # filtro vendido
+            if any(word in block for word in ["SOLD", "売り切れ", "売切"]):
+                continue
+
             price_jpy = parse_price(block)
 
             if not is_valid(title, price_jpy):
@@ -140,7 +155,9 @@ def scrape_mercari(keyword):
 
     return items[:5]
 
+# =========================
 # 🔥 YAHOO
+# =========================
 def scrape_yahoo(keyword):
     html = fetch(f"https://auctions.yahoo.co.jp/search/search?p={keyword}")
     if not html:
@@ -179,12 +196,18 @@ def scrape_yahoo(keyword):
 
     return items[:5]
 
+# =========================
+# 🌎 TRADUÇÃO
+# =========================
 def translate(text):
     try:
         return GoogleTranslator(source='auto', target='pt').translate(text)
     except:
         return text
 
+# =========================
+# 📤 ENVIO
+# =========================
 async def send(msg):
     await bot.send_message(
         chat_id=CHAT_ID,
@@ -192,11 +215,13 @@ async def send(msg):
         disable_web_page_preview=True
     )
 
+# =========================
 # 🚀 LOOP
+# =========================
 async def run():
     while True:
 
-        # ⚡ MERCARI (SNIPER)
+        # ⚡ MERCARI
         for keyword in KEYWORDS:
             items = scrape_mercari(keyword)
 
@@ -214,14 +239,14 @@ async def run():
 ⌚ {title}
 💰 {item['price']}
 
-🔗 {item['link']}
+🛒 {item['link']}
 """
 
                 await send(msg)
 
         await asyncio.sleep(25)
 
-        # 🔥 YAHOO (GRÁTIS)
+        # 🔥 YAHOO
         for keyword in KEYWORDS:
             items = scrape_yahoo(keyword)
 
@@ -238,7 +263,7 @@ async def run():
 ⌚ {title}
 💰 {item['price']}
 
-🔗 {item['link']}
+🛒 {item['link']}
 """
 
                 await send(msg)
