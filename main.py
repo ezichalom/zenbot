@@ -110,7 +110,7 @@ def fetch_zyte(url):
         return None
 
 # =========================
-# MERCARI (LEVE)
+# MERCARI
 # =========================
 def scrape_mercari(keyword):
     print("🔎 Mercari:", keyword)
@@ -134,7 +134,6 @@ def scrape_mercari(keyword):
 
             block = a.parent.get_text(" ", strip=True)
 
-            # filtro vendido simples
             if "SOLD" in block or "売り切れ" in block:
                 continue
 
@@ -159,13 +158,14 @@ def scrape_mercari(keyword):
     return items[:5]
 
 # =========================
-# YAHOO (RÁPIDO)
+# YAHOO
 # =========================
 def scrape_yahoo(keyword):
     print("🔥 Yahoo:", keyword)
 
     html = fetch(f"https://auctions.yahoo.co.jp/search/search?p={keyword}")
     if not html:
+        print("❌ Yahoo falhou")
         return []
 
     soup = BeautifulSoup(html, "html.parser")
@@ -175,7 +175,6 @@ def scrape_yahoo(keyword):
         try:
             title = li.select_one("h3").get_text(strip=True)
 
-            # até 1 dia restante
             if not ("1日" in li.text or "時間" in li.text):
                 continue
 
@@ -220,16 +219,17 @@ async def send(msg):
     )
 
 # =========================
-# LOOP
+# LOOP INTERCALADO (FIX)
 # =========================
 async def run():
     while True:
 
-        # MERCARI
         for keyword in KEYWORDS:
-            items = scrape_mercari(keyword)
 
-            for item in items:
+            # MERCARI
+            items_m = scrape_mercari(keyword)
+
+            for item in items_m:
                 if already_seen(item["id"]):
                     continue
 
@@ -246,13 +246,10 @@ async def run():
 """
                 await send(msg)
 
-        await asyncio.sleep(15)
+            # YAHOO (AGORA RODA SEMPRE)
+            items_y = scrape_yahoo(keyword)
 
-        # YAHOO
-        for keyword in KEYWORDS:
-            items = scrape_yahoo(keyword)
-
-            for item in items:
+            for item in items_y:
                 if already_seen(item["id"]):
                     continue
 
@@ -269,6 +266,8 @@ async def run():
 """
                 await send(msg)
 
-        await asyncio.sleep(30)
+            await asyncio.sleep(5)
+
+        await asyncio.sleep(20)
 
 asyncio.run(run())
