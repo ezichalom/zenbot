@@ -9,39 +9,29 @@ import re
 
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
 
 bot = Bot(token=TOKEN)
 seen = set()
 
-# 🔥 KEYWORDS
 KEYWORDS = [
     "tag heuer WAZ1110",
-    "tag heuer WAZ1112",
-    "tag heuer CAZ1010",
     "bvlgari aluminium AL38",
-    "bvlgari scuba",
     "Omega Speedmaster 3513",
-    "オメガ スピードマスター",
+    "タグホイヤー フォーミュラ1",
     "ブルガリ アルミニウム",
 ]
 
-# 🔥 FILTRO DE LIXO
 BAD_WORDS = [
     "belt", "strap", "ベルト",
     "band", "バンド",
     "部品", "parts",
-    "ケースのみ", "case only"
-]
-
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
 ]
 
 JPY_TO_BRL = 0.035
 
 
-# 🔥 CONVERSÃO ¥ → R$
+# 🔥 CONVERSÃO
 def convert_price(price_text):
     try:
         value = int(re.sub(r"[^\d]", "", price_text))
@@ -51,28 +41,37 @@ def convert_price(price_text):
         return price_text
 
 
-# 🔥 FETCH
+# 🟢 FETCH NORMAL (GRÁTIS → Yahoo)
 def fetch(url):
     try:
-        res = requests.get(
-            url,
-            headers={
-                "User-Agent": random.choice(USER_AGENTS),
-                "Accept-Language": "ja-JP"
-            },
-            timeout=10
-        )
-        if res.status_code == 200 and len(res.text) > 3000:
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
             return res.text
     except:
         pass
     return None
 
 
-# 🔥 YAHOO (leilão inteligente)
+# 🔴 FETCH ZYTE (Mercari / Rakuma)
+def fetch_zyte(url):
+    try:
+        res = requests.post(
+            "https://api.zyte.com/v1/extract",
+            auth=(ZYTE_API_KEY, ""),
+            json={"url": url, "browserHtml": True},
+            timeout=20
+        )
+        data = res.json()
+        return data.get("browserHtml")
+    except:
+        return None
+
+
+# 🔥 YAHOO (GRÁTIS)
 def scrape_yahoo(keyword):
     url = f"https://auctions.yahoo.co.jp/search/search?p={keyword}&ei=UTF-8"
     html = fetch(url)
+
     if not html:
         return []
 
@@ -88,21 +87,20 @@ def scrape_yahoo(keyword):
 
             full_text = li.get_text()
 
-            # 🔥 só itens próximos do fim
             if not ("1日" in full_text or "時間" in full_text):
                 continue
 
             a = li.select_one("a")
-            href = a.get("href")
-            auction_id = href.split("/")[-1]
+            auction_id = a.get("href").split("/")[-1]
 
             price_tag = li.select_one(".Product__priceValue")
             price = price_tag.get_text(strip=True) if price_tag else "N/A"
 
             items.append({
-                "id": auction_id,
+                "id": "yahoo_" + auction_id,
                 "title": title,
-                "price": price
+                "price": price,
+                "link": f"https://zenmarket.jp/pt/auction.aspx?itemCode={auction_id}"
             })
 
         except:
@@ -111,10 +109,11 @@ def scrape_yahoo(keyword):
     return items[:5]
 
 
-# 🔥 MERCARI (sniper rápido)
+# 🔥 MERCARI (ZYTE)
 def scrape_mercari(keyword):
     url = f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc"
-    html = fetch(url)
+    html = fetch_zyte(url)
+
     if not html:
         return []
 
@@ -134,7 +133,8 @@ def scrape_mercari(keyword):
             items.append({
                 "id": "mercari_" + item_id,
                 "title": title,
-                "url": f"https://jp.mercari.com{href}"
+                "price": "Buy Now",
+                "link": f"https://zenmarket.jp/pt/?url=https://jp.mercari.com{href}"
             })
 
         except:
@@ -143,13 +143,38 @@ def scrape_mercari(keyword):
     return items[:5]
 
 
-# 🔥 LINKS
-def to_zen_yahoo(item_id):
-    return f"https://zenmarket.jp/pt/auction.aspx?itemCode={item_id}"
+# 🔥 RAKUMA (ZYTE)
+def scrape_rakuma(keyword):
+    url = f"https://fril.jp/s?query={keyword}&sort=created_at_desc"
+    html = fetch_zyte(url)
 
+    if not html:
+        return []
 
-def to_zen_direct(url):
-    return f"https://zenmarket.jp/pt/?url={url}"
+    soup = BeautifulSoup(html, "html.parser")
+    items = []
+
+    for a in soup.select("a[href*='/item/']"):
+        try:
+            title = a.get_text(strip=True)
+
+            if any(b.lower() in title.lower() for b in BAD_WORDS):
+                continue
+
+            href = a.get("href")
+            item_id = href.split("/")[-1]
+
+            items.append({
+                "id": "rakuma_" + item_id,
+                "title": title,
+                "price": "Buy Now",
+                "link": f"https://zenmarket.jp/pt/?url=https://fril.jp{href}"
+            })
+
+        except:
+            continue
+
+    return items[:5]
 
 
 # 🔥 TRADUÇÃO
@@ -160,13 +185,15 @@ def translate(text):
         return text
 
 
-# 🔥 LOOP
+# 🔥 LOOP PRINCIPAL
 async def run():
     while True:
 
-        # ⚡ COMPRA IMEDIATA
+        # ⚡ SNIPER (Mercari + Rakuma)
         for keyword in KEYWORDS:
-            items = scrape_mercari(keyword)
+            items = []
+            items += scrape_mercari(keyword)
+            items += scrape_rakuma(keyword)
 
             for item in items:
                 if item["id"] in seen:
@@ -175,22 +202,21 @@ async def run():
                 seen.add(item["id"])
 
                 title = translate(item["title"])[:60]
-                link = to_zen_direct(item["url"])
 
                 msg = f"""⚡ COMPRA IMEDIATA
 
 ⌚ {title}
 
-💰 Buy Now
+💰 {item['price']}
 
-🔗 {link}
+🔗 {item['link']}
 """
 
                 await bot.send_message(chat_id=CHAT_ID, text=msg)
 
         await asyncio.sleep(25)
 
-        # 🔥 LEILÃO
+        # 🔥 YAHOO (GRÁTIS)
         for keyword in KEYWORDS:
             items = scrape_yahoo(keyword)
 
@@ -202,7 +228,6 @@ async def run():
 
                 title = translate(item["title"])[:60]
                 price = convert_price(item["price"])
-                link = to_zen_yahoo(item["id"])
 
                 msg = f"""🔥 LEILÃO TERMINANDO
 
@@ -210,7 +235,7 @@ async def run():
 
 💰 {price}
 
-🔗 {link}
+🔗 {item['link']}
 """
 
                 await bot.send_message(chat_id=CHAT_ID, text=msg)
