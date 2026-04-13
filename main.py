@@ -14,7 +14,7 @@ ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
 bot = Bot(token=TOKEN)
 
 # =========================
-# 🧠 BANCO
+# BANCO
 # =========================
 conn = sqlite3.connect("seen.db")
 cursor = conn.cursor()
@@ -49,7 +49,7 @@ KEYWORDS = [
 BAD_WORDS = ["belt", "strap", "ベルト", "band", "バンド", "部品"]
 
 # =========================
-# 💰 PREÇO
+# PREÇO
 # =========================
 def parse_price(text):
     jpy = re.search(r"¥\s?([\d,]+)", text)
@@ -64,7 +64,7 @@ def convert_price(jpy):
     return f"¥{jpy:,} (~R$ {brl:,})"
 
 # =========================
-# 🎯 FILTRO
+# FILTRO
 # =========================
 def is_valid(title, price_jpy):
     t = title.lower()
@@ -77,10 +77,10 @@ def is_valid(title, price_jpy):
 
     brl = price_jpy * JPY_TO_BRL
 
-    if "tag heuer" in t or "タグホイヤー" in t:
+    if "tag heuer" in t:
         return brl <= 4500
 
-    if "bvlgari" in t or "ブルガリ" in t:
+    if "bvlgari" in t:
         return brl <= 4100
 
     return brl <= 6800
@@ -103,38 +103,19 @@ def fetch_zyte(url):
             "https://api.zyte.com/v1/extract",
             auth=(ZYTE_API_KEY, ""),
             json={"url": url, "browserHtml": True},
-            timeout=20
+            timeout=15
         )
         return res.json().get("browserHtml")
     except:
         return None
 
 # =========================
-# 🔥 VALIDAÇÃO MERCARI
-# =========================
-def is_available_mercari(item_id):
-    try:
-        html = fetch_zyte(f"https://jp.mercari.com/item/{item_id}")
-        if not html:
-            return False
-
-        text = html.lower()
-
-        if any(word in text for word in ["sold", "売り切れ", "売切", "在庫なし"]):
-            return False
-
-        return True
-    except:
-        return False
-
-# =========================
-# 🔥 MERCARI
+# MERCARI (LEVE)
 # =========================
 def scrape_mercari(keyword):
-    print("🔎 Buscando:", keyword)
+    print("🔎 Mercari:", keyword)
 
     html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
-
     if not html:
         print("❌ Zyte falhou")
         return []
@@ -142,18 +123,19 @@ def scrape_mercari(keyword):
     soup = BeautifulSoup(html, "html.parser")
     items = []
 
-    for card in soup.find_all("a", href=True):
-        if "/item/" not in card["href"]:
+    for a in soup.find_all("a", href=True):
+        if "/item/" not in a["href"]:
             continue
 
         try:
-            title = card.get_text(strip=True)
+            title = a.get_text(strip=True)
             if not title:
                 continue
 
-            block = card.parent.get_text(" ", strip=True)
+            block = a.parent.get_text(" ", strip=True)
 
-            if any(word in block for word in ["SOLD", "売り切れ", "売切"]):
+            # filtro vendido simples
+            if "SOLD" in block or "売り切れ" in block:
                 continue
 
             price_jpy = parse_price(block)
@@ -161,11 +143,7 @@ def scrape_mercari(keyword):
             if not is_valid(title, price_jpy):
                 continue
 
-            item_id = card["href"].split("/")[-1]
-
-            # 🚨 TESTE (VALIDAÇÃO DESATIVADA)
-            # if not is_available_mercari(item_id):
-            #     continue
+            item_id = a["href"].split("/")[-1]
 
             items.append({
                 "id": "mercari_" + item_id,
@@ -177,11 +155,11 @@ def scrape_mercari(keyword):
         except:
             continue
 
-    print("✅ Encontrados:", len(items))
+    print("✅ Mercari encontrados:", len(items))
     return items[:5]
 
 # =========================
-# 🔥 YAHOO
+# YAHOO (RÁPIDO)
 # =========================
 def scrape_yahoo(keyword):
     print("🔥 Yahoo:", keyword)
@@ -197,6 +175,7 @@ def scrape_yahoo(keyword):
         try:
             title = li.select_one("h3").get_text(strip=True)
 
+            # até 1 dia restante
             if not ("1日" in li.text or "時間" in li.text):
                 continue
 
@@ -246,6 +225,7 @@ async def send(msg):
 async def run():
     while True:
 
+        # MERCARI
         for keyword in KEYWORDS:
             items = scrape_mercari(keyword)
 
@@ -264,11 +244,11 @@ async def run():
 
 🛒 {item['link']}
 """
-
                 await send(msg)
 
-        await asyncio.sleep(20)
+        await asyncio.sleep(15)
 
+        # YAHOO
         for keyword in KEYWORDS:
             items = scrape_yahoo(keyword)
 
@@ -287,9 +267,8 @@ async def run():
 
 🛒 {item['link']}
 """
-
                 await send(msg)
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)
 
 asyncio.run(run())
