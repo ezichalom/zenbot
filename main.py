@@ -13,31 +13,25 @@ ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
 
 bot = Bot(token=TOKEN)
 
-# =========================
-# BANCO
-# =========================
 conn = sqlite3.connect("seen.db")
 cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)")
 conn.commit()
 
-def seen(item_id):
-    cursor.execute("SELECT 1 FROM seen WHERE id=?", (item_id,))
+def seen(i):
+    cursor.execute("SELECT 1 FROM seen WHERE id=?", (i,))
     return cursor.fetchone()
 
-def save(item_id):
-    cursor.execute("INSERT OR IGNORE INTO seen VALUES (?)", (item_id,))
+def save(i):
+    cursor.execute("INSERT OR IGNORE INTO seen VALUES (?)", (i,))
     conn.commit()
 
-# =========================
-# CONFIG
-# =========================
 JPY_TO_BRL = 0.035
 
 KEYWORDS = [
-    "tag heuer", "タグホイヤー", "WAZ1110", "WAZ1112", "CAZ1010",
-    "bvlgari", "ブルガリ", "al38", "al38ta",
-    "omega", "オメガ", "speedmaster", "3513"
+    "tag heuer","タグホイヤー","waz","caz",
+    "bvlgari","ブルガリ","al38",
+    "omega","オメガ","speedmaster","3513"
 ]
 
 BAD_WORDS = [
@@ -48,109 +42,88 @@ BAD_WORDS = [
     "pokemon","yugioh","toy","figure"
 ]
 
-MODEL_WORDS = ["al38","waz","caz","3513","speedmaster"]
-
-# =========================
-# FUNÇÕES
-# =========================
 def parse_price(text):
-    jpy = re.search(r"¥\s?([\d,]+)", text)
-    if jpy:
-        return int(jpy.group(1).replace(",", ""))
-    return None
+    m = re.search(r"¥\s?([\d,]+)", text)
+    return int(m.group(1).replace(",", "")) if m else None
 
-def convert(price):
-    if not price:
-        return "Preço não encontrado"
-    brl = int(price * JPY_TO_BRL)
-    return f"¥{price:,} (~R$ {brl:,})"
+def convert(p):
+    if not p:
+        return "N/A"
+    return f"¥{p:,} (~R$ {int(p*JPY_TO_BRL):,})"
 
 def valid(title, price):
     t = title.lower()
 
-    # lixo
     if any(b in t for b in BAD_WORDS):
         return False
 
-    # precisa ter modelo relevante
-    if not any(m in t for m in MODEL_WORDS):
+    if not any(x in t for x in ["watch","時計","腕時計"]):
         return False
 
-    # precisa ter preço
     if not price:
         return False
 
-    # corta lixo barato
     if price < 20000:
         return False
 
     return True
 
-def translate(text):
+def translate(t):
     try:
-        return GoogleTranslator(source='auto', target='pt').translate(text)
+        return GoogleTranslator(source='auto', target='pt').translate(t)
     except:
-        return text
+        return t
 
-# =========================
-# FETCH
-# =========================
 def fetch_zyte(url):
     try:
-        res = requests.post(
+        r = requests.post(
             "https://api.zyte.com/v1/extract",
-            auth=(ZYTE_API_KEY, ""),
-            json={"url": url, "browserHtml": True},
+            auth=(ZYTE_API_KEY,""),
+            json={"url":url,"browserHtml":True},
             timeout=15
         )
-        return res.json().get("browserHtml")
+        return r.json().get("browserHtml")
     except:
         return None
 
 def fetch(url):
     try:
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200:
-            return res.text
+        r = requests.get(url, timeout=10)
+        return r.text if r.status_code == 200 else None
     except:
         return None
 
-# =========================
-# MERCARI
-# =========================
-def mercari(keyword, sort):
-    url = f"https://jp.mercari.com/search?keyword={keyword}&sort={sort}&order=desc"
-    html = fetch_zyte(url)
-
+def mercari(k, sort):
+    html = fetch_zyte(f"https://jp.mercari.com/search?keyword={k}&sort={sort}&order=desc")
     if not html:
         return []
 
-    soup = BeautifulSoup(html, "html.parser")
-    items = []
+    soup = BeautifulSoup(html,"html.parser")
+    items=[]
 
-    for a in soup.find_all("a", href=True):
+    for a in soup.find_all("a",href=True):
         if "/item/" not in a["href"]:
             continue
 
         try:
-            title = a.get_text(strip=True)
-            block = a.parent.get_text(" ", strip=True)
+            title=a.get_text(strip=True)
+            block=a.parent.get_text(" ",strip=True)
 
             if "SOLD" in block or "売り切れ" in block:
                 continue
 
-            price = parse_price(block)
+            price=parse_price(block)
 
-            if not valid(title, price):
+            if not valid(title,price):
                 continue
 
-            item_id = a["href"].split("/")[-1]
+            id=a["href"].split("/")[-1]
 
             items.append({
-                "id": item_id,
-                "title": title,
-                "price": price,
-                "link": f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
+                "id":id,
+                "title":title,
+                "price":price,
+                "link":f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={id}"
             })
 
         except:
@@ -158,35 +131,31 @@ def mercari(keyword, sort):
 
     return items[:5]
 
-# =========================
-# YAHOO
-# =========================
-def yahoo(keyword):
-    html = fetch(f"https://auctions.yahoo.co.jp/search/search?p={keyword}")
+def yahoo(k):
+    html=fetch(f"https://auctions.yahoo.co.jp/search/search?p={k}")
     if not html:
         return []
 
-    soup = BeautifulSoup(html, "html.parser")
-    items = []
+    soup=BeautifulSoup(html,"html.parser")
+    items=[]
 
     for li in soup.select("li.Product"):
         try:
-            title = li.select_one("h3").get_text(strip=True)
-            text = li.get_text()
+            title=li.select_one("h3").get_text(strip=True)
+            text=li.get_text()
+            price=parse_price(text)
 
-            price = parse_price(text)
-
-            if not valid(title, price):
+            if not valid(title,price):
                 continue
 
-            link = li.select_one("a").get("href")
-            item_id = link.split("/")[-1]
+            link=li.select_one("a").get("href")
+            id=link.split("/")[-1]
 
             items.append({
-                "id": item_id,
-                "title": title,
-                "price": price,
-                "link": f"https://zenmarket.jp/pt/auction.aspx?itemCode={item_id}"
+                "id":id,
+                "title":title,
+                "price":price,
+                "link":f"https://zenmarket.jp/pt/auction.aspx?itemCode={id}"
             })
 
         except:
@@ -194,61 +163,43 @@ def yahoo(keyword):
 
     return items[:5]
 
-# =========================
-# ENVIO
-# =========================
-async def send(item, tipo):
-    title = translate(item["title"])[:70]
-    price = convert(item["price"])
+async def send(i,src):
+    msg=f"""🔥 OPORTUNIDADE ({src})
 
-    msg = f"""🔥 OPORTUNIDADE ({tipo})
+⌚ {translate(i['title'])[:70]}
 
-⌚ {title}
+💰 {convert(i['price'])}
 
-💰 {price}
-
-🔗 {item['link']}
+🔗 {i['link']}
 """
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
+    await bot.send_message(chat_id=CHAT_ID,text=msg)
 
-# =========================
-# LOOPS
-# =========================
 async def mercari_loop():
     while True:
         for k in KEYWORDS:
-            # SNIPER
-            items = mercari(k, "created_time")
+            items=mercari(k,"created_time")+mercari(k,"price")
 
-            # SCANNER
-            items += mercari(k, "price")
-
-            for item in items:
-                if seen(item["id"]):
+            for i in items:
+                if seen(i["id"]):
                     continue
+                save(i["id"])
+                await send(i,"MERCARI")
 
-                save(item["id"])
-                await send(item, "MERCARI")
-
-        await asyncio.sleep(120)  # 2 min
+        await asyncio.sleep(120)
 
 async def yahoo_loop():
     while True:
         for k in KEYWORDS:
-            items = yahoo(k)
+            items=yahoo(k)
 
-            for item in items:
-                if seen(item["id"]):
+            for i in items:
+                if seen(i["id"]):
                     continue
+                save(i["id"])
+                await send(i,"YAHOO")
 
-                save(item["id"])
-                await send(item, "YAHOO")
+        await asyncio.sleep(10800)
 
-        await asyncio.sleep(10800)  # 3h
-
-# =========================
-# MAIN
-# =========================
 async def main():
     await asyncio.gather(
         mercari_loop(),
