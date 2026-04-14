@@ -40,7 +40,15 @@ KEYWORDS = [
     "omega", "オメガ", "speedmaster", "3513"
 ]
 
-BAD_WORDS = ["belt", "strap", "ベルト", "band", "バンド", "部品"]
+BAD_WORDS = [
+    "belt", "strap", "ベルト",
+    "band", "バンド",
+    "部品", "parts", "part",
+    "box", "case", "empty",
+    "空箱", "箱のみ",
+    "manual", "冊子",
+    "only", "のみ"
+]
 
 # =========================
 # PREÇO
@@ -58,7 +66,34 @@ def convert_price(jpy):
     return f"¥{jpy:,} (~R$ {brl:,})"
 
 # =========================
-# CHECK ZEN
+# FILTRO
+# =========================
+def is_valid(title, price_jpy):
+    t = title.lower()
+
+    # lixo
+    if any(b in t for b in BAD_WORDS):
+        return False
+
+    # precisa ser relógio
+    if not any(x in t for x in ["watch", "腕時計", "時計"]):
+        return False
+
+    if not price_jpy:
+        return False
+
+    brl = price_jpy * JPY_TO_BRL
+
+    if "tag heuer" in t or "タグホイヤー" in t:
+        return brl <= 4500
+
+    if "bvlgari" in t or "ブルガリ" in t:
+        return brl <= 4100
+
+    return brl <= 6800
+
+# =========================
+# ZEN CHECK
 # =========================
 def zenmarket_online():
     try:
@@ -102,8 +137,6 @@ def fetch(url):
 # MERCARI SNIPER
 # =========================
 def scrape_mercari_sniper(keyword):
-    print("⚡ Sniper:", keyword)
-
     html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=created_time&order=desc")
     if not html:
         return []
@@ -122,10 +155,11 @@ def scrape_mercari_sniper(keyword):
             if "SOLD" in block or "売り切れ" in block:
                 continue
 
-            if any(b in title.lower() for b in BAD_WORDS):
+            price_jpy = parse_price(block)
+
+            if not is_valid(title, price_jpy):
                 continue
 
-            price_jpy = parse_price(block)
             item_id = a["href"].split("/")[-1]
 
             items.append({
@@ -138,15 +172,12 @@ def scrape_mercari_sniper(keyword):
         except:
             continue
 
-    print("✅ Sniper:", len(items))
     return items[:5]
 
 # =========================
 # MERCARI SCANNER
 # =========================
 def scrape_mercari_scanner(keyword):
-    print("🧠 Scanner:", keyword)
-
     html = fetch_zyte(f"https://jp.mercari.com/search?keyword={keyword}&sort=price&order=asc")
     if not html:
         return []
@@ -165,10 +196,11 @@ def scrape_mercari_scanner(keyword):
             if "SOLD" in block or "売り切れ" in block:
                 continue
 
-            if any(b in title.lower() for b in BAD_WORDS):
+            price_jpy = parse_price(block)
+
+            if not is_valid(title, price_jpy):
                 continue
 
-            price_jpy = parse_price(block)
             item_id = a["href"].split("/")[-1]
 
             items.append({
@@ -181,15 +213,12 @@ def scrape_mercari_scanner(keyword):
         except:
             continue
 
-    print("✅ Scanner:", len(items))
     return items[:5]
 
 # =========================
 # YAHOO
 # =========================
 def scrape_yahoo(keyword):
-    print("🔥 Yahoo:", keyword)
-
     html = fetch(f"https://auctions.yahoo.co.jp/search/search?p={keyword}")
     if not html:
         return []
@@ -211,6 +240,9 @@ def scrape_yahoo(keyword):
 
             price_jpy = parse_price(text)
 
+            if not is_valid(title, price_jpy):
+                continue
+
             items.append({
                 "id": "yahoo_" + auction_id,
                 "title": title,
@@ -221,7 +253,6 @@ def scrape_yahoo(keyword):
         except:
             continue
 
-    print("✅ Yahoo:", len(items))
     return items[:5]
 
 # =========================
@@ -259,8 +290,7 @@ async def mercari_sniper_loop():
 
                 await send(f"⚡ {translate(item['title'])[:60]}\n💰 {item['price']}\n{item['link']}")
 
-        await asyncio.sleep(300)  # 5 min
-
+        await asyncio.sleep(300)
 
 async def mercari_scanner_loop():
     while True:
@@ -279,8 +309,7 @@ async def mercari_scanner_loop():
 
                 await send(f"🧠 {translate(item['title'])[:60]}\n💰 {item['price']}\n{item['link']}")
 
-        await asyncio.sleep(60)  # 1 MINUTO
-
+        await asyncio.sleep(120)  # 2 minutos
 
 async def yahoo_loop():
     while True:
@@ -299,8 +328,7 @@ async def yahoo_loop():
 
                 await send(f"🔥 {translate(item['title'])[:60]}\n💰 {item['price']}\n{item['link']}")
 
-        await asyncio.sleep(10800)  # 3 HORAS
-
+        await asyncio.sleep(10800)
 
 # =========================
 # MAIN
