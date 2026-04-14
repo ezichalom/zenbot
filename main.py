@@ -80,12 +80,12 @@ def is_valid(title, price_jpy):
     return brl <= 6800
 
 # =========================
-# CHECK ZENMARKET
+# CHECK ZEN (CORRIGIDO)
 # =========================
 def zenmarket_online():
     try:
-        res = requests.get("https://zenmarket.jp", timeout=5)
-        return res.status_code == 200
+        requests.get("https://zenmarket.jp", timeout=5)
+        return True
     except:
         return False
 
@@ -259,13 +259,24 @@ async def send(msg):
     await bot.send_message(chat_id=CHAT_ID, text=msg, disable_web_page_preview=True)
 
 # =========================
+# ESPERA INTELIGENTE
+# =========================
+async def wait_for_zen():
+    while True:
+        if zenmarket_online():
+            print("✅ ZenMarket voltou")
+            return
+        print("⏳ Zen ainda OFF...")
+        await asyncio.sleep(60)
+
+# =========================
 # LOOPS
 # =========================
 async def mercari_sniper_loop():
     while True:
         if not zenmarket_online():
             print("❌ Zen OFF (sniper)")
-            await asyncio.sleep(3600)
+            await wait_for_zen()
             continue
 
         for keyword in KEYWORDS:
@@ -283,7 +294,7 @@ async def mercari_scanner_loop():
     while True:
         if not zenmarket_online():
             print("❌ Zen OFF (scanner)")
-            await asyncio.sleep(3600)
+            await wait_for_zen()
             continue
 
         for keyword in KEYWORDS:
@@ -294,14 +305,14 @@ async def mercari_scanner_loop():
                 mark_seen(item["id"])
                 await send(f"🧠 {translate(item['title'])[:60]}\n💰 {item['price']}\n{item['link']}")
 
-        await asyncio.sleep(10800)  # 3h
+        await asyncio.sleep(10800)
 
 
 async def yahoo_loop():
     while True:
         if not zenmarket_online():
             print("❌ Zen OFF (yahoo)")
-            await asyncio.sleep(3600)
+            await wait_for_zen()
             continue
 
         for keyword in KEYWORDS:
