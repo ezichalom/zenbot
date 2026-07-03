@@ -95,6 +95,28 @@ def build_payload(
     }
 
 
+def _parse_data_lines(data_lines: list[str]) -> Optional[dict]:
+    """
+    Tenta reconstruir o JSON de um bloco SSE.
+
+    Eventos grandes (HAS_DATA com dezenas de produtos) podem chegar
+    quebrados em várias linhas `data:`. A quebra pode cair NO MEIO de uma
+    string do JSON — nesse caso juntar com "\\n" invalida o JSON.
+    Estratégia: tenta juntar sem separador primeiro (caso mais comum de
+    quebra arbitrária), depois com "\\n" (SSE spec), depois cada linha só.
+    """
+    candidates = ["".join(data_lines), "\n".join(data_lines)]
+    if len(data_lines) == 1:
+        candidates = [data_lines[0]]
+
+    for cand in candidates:
+        try:
+            return json.loads(cand)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
 def iter_sse_events(response: requests.Response) -> Iterator[tuple[str, dict]]:
     """
     Faz o parse manual do fluxo SSE.
@@ -103,7 +125,7 @@ def iter_sse_events(response: requests.Response) -> Iterator[tuple[str, dict]]:
     event_name = None
     data_lines: list[str] = []
 
-    for raw in response.iter_lines(decode_unicode=True):
+    for raw in response.iter_lines(decode_unicode=True, chunk_size=8192):
         if raw is None:
             continue
         line = raw.strip("\r")
@@ -115,19 +137,23 @@ def iter_sse_events(response: requests.Response) -> Iterator[tuple[str, dict]]:
         elif line == "":
             # linha em branco = fim do bloco SSE
             if event_name and data_lines:
-                try:
-                    payload = json.loads("\n".join(data_lines))
+                payload = _parse_data_lines(data_lines)
+                if payload is not None:
                     yield event_name, payload
-                except json.JSONDecodeError:
-                    log.warning("Bloco SSE com JSON inválido, ignorado.")
+                else:
+                    preview = ("".join(data_lines))[:150]
+                    log.warning(
+                        "Bloco SSE com JSON inválido, ignorado. "
+                        "event=%r linhas=%d inicio=%r",
+                        event_name, len(data_lines), preview,
+                    )
             event_name, data_lines = None, []
 
     # flush final (caso o stream termine sem linha em branco)
     if event_name and data_lines:
-        try:
-            yield event_name, json.loads("\n".join(data_lines))
-        except json.JSONDecodeError:
-            pass
+        payload = _parse_data_lines(data_lines)
+        if payload is not None:
+            yield event_name, payload
 
 
 def stream_search(
