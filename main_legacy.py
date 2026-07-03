@@ -1,52 +1,24 @@
-"""
-ZenScrapperBot — v2 (API stream do ZenMarket)
-==============================================
-Substitui o scraping de HTML (Mercari + Yahoo Auctions) pela API interna
-de busca do ZenMarket descoberta via engenharia reversa em 03/07/2026:
-
-    POST https://zenmarket.jp/pt/search.aspx?stream=1  →  SSE (store-result)
-
-Vantagens sobre a v1 (preservada em main_legacy.py):
-  - JSON estruturado: título, preço, URL, imagem, vendedor — sem BeautifulSoup
-  - Dados de leilão NATIVOS do Yahoo: Bids, BuyoutPrice, EndTime exato (+09:00)
-    → aposenta o parse_yahoo_end_time() aproximado
-  - 1 request cobre Mercari + Yahoo Auctions de uma vez
-  - Menos requests/ciclo = menos risco de bloqueio
-
-Toda a lógica de negócio da v1 foi mantida:
-  SQLite (seen/auctions/price_history), tetos por marca, alerta de bom
-  negócio (% abaixo da média), BAD_WORDS, tradução PT, alertas 24h/1h.
-"""
-
 import os
 import asyncio
-import logging
+import requests
+from bs4 import BeautifulSoup
+from telegram import Bot
+from deep_translator import GoogleTranslator
 import re
 import sqlite3
 from datetime import datetime, timezone
-
-from telegram import Bot
-from deep_translator import GoogleTranslator
-
-from zenmarket_stream import search as zen_search, STORE
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("zenbot")
+import random
 
 # ─────────────────────────────────────────────
 # ENV
 # ─────────────────────────────────────────────
-TOKEN   = os.getenv("TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-
-# Intervalo entre ciclos completos de busca (segundos).
-# 300s = 5 min. Configurável via variável de ambiente no Railway.
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "300"))
+TOKEN      = os.getenv("TOKEN")
+CHAT_ID    = os.getenv("CHAT_ID")
 
 bot = Bot(token=TOKEN)
 
 # ─────────────────────────────────────────────
-# BANCO DE DADOS (idêntico à v1)
+# BANCO DE DADOS
 # ─────────────────────────────────────────────
 conn   = sqlite3.connect("seen.db")
 cursor = conn.cursor()
@@ -89,7 +61,10 @@ def save_price_history(keyword, price, source):
     conn.commit()
 
 def get_avg_price(keyword):
-    cursor.execute("SELECT AVG(price) FROM price_history WHERE keyword=?", (keyword,))
+    cursor.execute(
+        "SELECT AVG(price) FROM price_history WHERE keyword=?",
+        (keyword,)
+    )
     row = cursor.fetchone()
     return row[0] if row and row[0] else None
 
@@ -113,10 +88,11 @@ def remove_auction(id):
     conn.commit()
 
 # ─────────────────────────────────────────────
-# CONFIGURAÇÕES (idênticas à v1)
+# CONFIGURAÇÕES
 # ─────────────────────────────────────────────
 JPY_TO_BRL = 0.035
 
+# Teto máximo fixo por marca (JPY)
 BRAND_MAX_PRICE = {
     "tag heuer":   800_000,
     "タグホイヤー": 800_000,
@@ -127,7 +103,8 @@ BRAND_MAX_PRICE = {
     "speedmaster": 1_200_000,
 }
 
-GOOD_DEAL_THRESHOLD = 0.20   # 20% abaixo da média histórica
+# Desconto mínimo para alerta de "bom valor" (% abaixo da média histórica)
+GOOD_DEAL_THRESHOLD = 0.20   # 20% abaixo da média
 
 KEYWORDS = [
     "tag heuer","タグホイヤー","waz","caz",
@@ -140,16 +117,36 @@ BAD_WORDS = [
     "parts","部品","box","case","empty","箱のみ",
     "manual","冊子","only","のみ",
     "pen","seed","card","book","reading",
-    "pokemon","yugioh","toy","figure",
-    "ムーブメント","movement","リューズ","尾錠","バックル","buckle",
+    "pokemon","yugioh","toy","figure"
 ]
 
-# Lojas monitoradas via API stream
-MONITORED_STORES = [STORE["Mercari"], STORE["YahooAuction"]]
+# ─────────────────────────────────────────────
+# HEADERS ROTATIVOS (substitui Zyte)
+# ─────────────────────────────────────────────
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+]
+
+def random_headers():
+    return {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://www.google.com/",
+        "DNT": "1",
+    }
 
 # ─────────────────────────────────────────────
 # UTILITÁRIOS
 # ─────────────────────────────────────────────
+def parse_price(text):
+    m = re.search(r"¥\s?([\d,]+)", text)
+    return int(m.group(1).replace(",", "")) if m else None
+
 def convert(p):
     if not p:
         return "N/A"
@@ -158,7 +155,7 @@ def convert(p):
 def translate(t):
     try:
         return GoogleTranslator(source="auto", target="pt").translate(t)
-    except Exception:
+    except:
         return t
 
 def get_brand(title):
@@ -170,7 +167,9 @@ def get_brand(title):
 
 def is_above_max_price(title, price):
     brand = get_brand(title)
-    return bool(brand and price > BRAND_MAX_PRICE[brand])
+    if brand and price > BRAND_MAX_PRICE[brand]:
+        return True
+    return False
 
 def good_deal_flags(keyword, price):
     """Retorna (is_below_avg, is_below_max, pct_below_avg)"""
@@ -189,16 +188,11 @@ def good_deal_flags(keyword, price):
 
     return is_below_avg, is_below_max, pct
 
-def valid(title, description, price):
-    """Mesma régua da v1, agora com descrição estruturada como apoio."""
-    t = (title or "").lower()
-    d = (description or "").lower()
-
+def valid(title, price):
+    t = title.lower()
     if any(b in t for b in BAD_WORDS):
         return False
-    # v1 exigia palavra de relógio no título; agora aceita no título OU descrição
-    # (a API traz descrições completas, então isso reduz falsos negativos)
-    if not any(x in t + " " + d for x in ["watch", "時計", "腕時計"]):
+    if not any(x in t for x in ["watch", "時計", "腕時計"]):
         return False
     if not price:
         return False
@@ -208,21 +202,23 @@ def valid(title, description, price):
         return False
     return True
 
-def build_link(product):
-    """Converte o produto para o link de compra dentro do ZenMarket."""
-    sku = product["sku"]
-    if product["storeName"] == "Mercari":
-        return f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={sku}"
-    if product["storeName"] == "YahooAuction":
-        return f"https://zenmarket.jp/pt/auction.aspx?itemCode={sku}"
-    return product.get("url") or ""
+def fetch(url, use_headers=False, retries=2):
+    for _ in range(retries):
+        try:
+            headers = random_headers() if use_headers else {}
+            r = requests.get(url, headers=headers, timeout=12)
+            if r.status_code == 200:
+                return r.text
+        except:
+            pass
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(2))
+    return None
 
 # ─────────────────────────────────────────────
 # TELEGRAM — MENSAGENS
 # ─────────────────────────────────────────────
-async def send_new_item(product, keyword):
-    price = product["price"]
-    is_below_avg, is_below_max, pct = good_deal_flags(keyword, price)
+async def send_new_item(item, src, keyword):
+    is_below_avg, is_below_max, pct = good_deal_flags(keyword, item["price"])
 
     deal_tag = ""
     if is_below_avg and is_below_max:
@@ -232,22 +228,12 @@ async def send_new_item(product, keyword):
     elif is_below_max:
         deal_tag = "🟡 Dentro do teto máximo por marca\n"
 
-    auction_info = ""
-    if product.get("bids") is not None:
-        auction_info = f"🔨 Lances: {product['bids']}"
-        if product.get("buyoutPrice"):
-            auction_info += f" | Compra imediata: ¥{product['buyoutPrice']:,}"
-        auction_info += "\n"
-    if product.get("auctionEndTime"):
-        auction_info += f"🕐 Fim: {product['auctionEndTime']:%d/%m %H:%M} (JST)\n"
-
     msg = (
-        f"🔔 NOVO ANÚNCIO ({product['storeName'].upper()})\n"
+        f"🔔 NOVO ANÚNCIO ({src})\n"
         f"{deal_tag}"
-        f"\n⌚ {translate(product['title'])[:70]}\n"
-        f"💰 {convert(price)}\n"
-        f"{auction_info}"
-        f"🔗 {build_link(product)}\n"
+        f"\n⌚ {translate(item['title'])[:70]}\n"
+        f"💰 {convert(item['price'])}\n"
+        f"🔗 {item['link']}\n"
     )
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
@@ -264,70 +250,144 @@ async def send_auction_ending(item_row, hours_left):
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
 # ─────────────────────────────────────────────
-# BUSCA VIA API STREAM (substitui mercari() e yahoo())
+# SCRAPING — MERCARI (sem Zyte)
 # ─────────────────────────────────────────────
-def fetch_keyword(keyword):
-    """Chamada síncrona à API stream — roda em thread pra não travar o loop."""
-    return zen_search(
-        keyword,
-        stores=MONITORED_STORES,
-        page_size=20,
-    )
+def mercari(k, sort):
+    url  = f"https://jp.mercari.com/search?keyword={k}&sort={sort}&order=desc"
+    html = fetch(url, use_headers=True)
+    if not html:
+        return []
 
-async def search_loop():
-    """Loop unificado: 1 request por keyword cobre Mercari + Yahoo Auctions."""
-    consecutive_errors = 0
+    soup  = BeautifulSoup(html, "html.parser")
+    items = []
 
-    while True:
-        for k in KEYWORDS:
-            try:
-                products = await asyncio.to_thread(fetch_keyword, k)
-                consecutive_errors = 0
-            except Exception as e:
-                consecutive_errors += 1
-                log.warning("Busca falhou para %r: %s", k, e)
-                # Backoff progressivo se o Cloudflare começar a bloquear
-                if consecutive_errors >= 3:
-                    log.error("3 falhas seguidas — pausando 15 min (possível bloqueio).")
-                    await asyncio.sleep(900)
-                    consecutive_errors = 0
+    for a in soup.find_all("a", href=True):
+        if "/item/" not in a["href"]:
+            continue
+        try:
+            title = a.get_text(strip=True)
+            block = a.parent.get_text(" ", strip=True)
+
+            if "SOLD" in block or "売り切れ" in block:
                 continue
 
-            for p in products:
-                if not valid(p["title"], p["raw"].get("description", ""), p["price"]):
-                    continue
+            price = parse_price(block)
+            if not valid(title, price):
+                continue
 
-                uid    = f'{p["storeName"]}:{p["sku"]}'
-                source = p["storeName"].lower()
+            item_id = a["href"].split("/")[-1]
+            items.append({
+                "id":    item_id,
+                "title": title,
+                "price": price,
+                "link":  f"https://zenmarket.jp/pt/mercariProduct.aspx?itemCode={item_id}"
+            })
+        except:
+            continue
 
-                if seen(uid):
-                    # Leilões: lances sobem, atualiza histórico mesmo já visto
-                    if source == "yahooauction":
-                        save_price_history(k, p["price"], source)
-                    continue
-
-                save(uid)
-                save_price_history(k, p["price"], source)
-
-                # EndTime nativo da API → salva pro monitor de leilões
-                if p.get("auctionEndTime"):
-                    save_auction(
-                        uid, p["title"], p["price"],
-                        p["auctionEndTime"].isoformat(),
-                        build_link(p),
-                    )
-
-                await send_new_item(p, k)
-                await asyncio.sleep(1)   # respiro entre mensagens Telegram
-
-            await asyncio.sleep(5)       # respiro entre keywords
-
-        log.info("Ciclo completo. Próximo em %ss.", POLL_INTERVAL)
-        await asyncio.sleep(POLL_INTERVAL)
+    return items[:5]
 
 # ─────────────────────────────────────────────
-# MONITOR DE LEILÕES (idêntico à v1)
+# SCRAPING — YAHOO AUCTIONS
 # ─────────────────────────────────────────────
+def parse_yahoo_end_time(text):
+    """Tenta extrair data/hora de fim do bloco de texto do item."""
+    # Formato comum: "残り X日" (dias restantes) ou "DD月DD日 HH:MM"
+    m = re.search(r"(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})", text)
+    if m:
+        now  = datetime.now(timezone.utc)
+        year = now.year
+        month, day, hour, minute = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+        dt   = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+        return dt.isoformat()
+
+    # Fallback: "残り Xd Yh" → calcula aproximado
+    m2 = re.search(r"残り\s*(\d+)\s*日", text)
+    if m2:
+        from datetime import timedelta
+        days = int(m2.group(1))
+        dt   = datetime.now(timezone.utc) + timedelta(days=days)
+        return dt.isoformat()
+
+    return None
+
+def yahoo(k):
+    html = fetch(f"https://auctions.yahoo.co.jp/search/search?p={k}", use_headers=True)
+    if not html:
+        return []
+
+    soup  = BeautifulSoup(html, "html.parser")
+    items = []
+
+    # Tenta seletor principal; fallback para <div class="Product">
+    candidates = soup.select("li.Product") or soup.select("div.Product")
+
+    for li in candidates:
+        try:
+            h3 = li.select_one("h3") or li.select_one(".Product__title")
+            if not h3:
+                continue
+            title = h3.get_text(strip=True)
+            text  = li.get_text(" ", strip=True)
+            price = parse_price(text)
+
+            if not valid(title, price):
+                continue
+
+            a    = li.select_one("a")
+            link = a.get("href") if a else ""
+            item_id = link.rstrip("/").split("/")[-1]
+
+            end_time = parse_yahoo_end_time(text)
+
+            items.append({
+                "id":       item_id,
+                "title":    title,
+                "price":    price,
+                "end_time": end_time,
+                "link":     f"https://zenmarket.jp/pt/auction.aspx?itemCode={item_id}"
+            })
+        except:
+            continue
+
+    return items[:5]
+
+# ─────────────────────────────────────────────
+# LOOPS PRINCIPAIS
+# ─────────────────────────────────────────────
+async def mercari_loop():
+    while True:
+        for k in KEYWORDS:
+            for sort in ("created_time", "price"):
+                items = mercari(k, sort)
+                for i in items:
+                    if seen(i["id"]):
+                        continue
+                    save(i["id"])
+                    save_price_history(k, i["price"], "mercari")
+                    await send_new_item(i, "MERCARI", k)
+                await asyncio.sleep(3)   # pausa entre requests
+        await asyncio.sleep(120)
+
+
+async def yahoo_loop():
+    while True:
+        for k in KEYWORDS:
+            items = yahoo(k)
+            for i in items:
+                if seen(i["id"]):
+                    # Mesmo já visto, atualiza preço no histórico (lances sobem)
+                    save_price_history(k, i["price"], "yahoo")
+                    continue
+                save(i["id"])
+                save_price_history(k, i["price"], "yahoo")
+                if i.get("end_time"):
+                    save_auction(i["id"], i["title"], i["price"], i["end_time"], i["link"])
+                await send_new_item(i, "YAHOO", k)
+            await asyncio.sleep(3)
+        await asyncio.sleep(10_800)
+
+
 async def auction_monitor_loop():
     """Verifica leilões salvos e alerta faltando 24h e 1h para o fim."""
     while True:
@@ -341,9 +401,7 @@ async def auction_monitor_loop():
                 continue
 
             try:
-                end_dt = datetime.fromisoformat(end_time_str)
-                if end_dt.tzinfo is None:
-                    end_dt = end_dt.replace(tzinfo=timezone.utc)
+                end_dt   = datetime.fromisoformat(end_time_str)
                 hours_left = (end_dt - now).total_seconds() / 3600
 
                 if hours_left < 0:
@@ -363,14 +421,14 @@ async def auction_monitor_loop():
 
         await asyncio.sleep(1_800)   # verifica a cada 30 min
 
+
 # ─────────────────────────────────────────────
 # ENTRY POINT
 # ─────────────────────────────────────────────
 async def main():
-    log.info("ZenScrapperBot v2 iniciado — API stream | %s keywords | poll=%ss",
-             len(KEYWORDS), POLL_INTERVAL)
     await asyncio.gather(
-        search_loop(),
+        mercari_loop(),
+        yahoo_loop(),
         auction_monitor_loop(),
     )
 
