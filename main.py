@@ -117,22 +117,29 @@ def remove_auction(id):
 # ─────────────────────────────────────────────
 JPY_TO_BRL = 0.035
 
-BRAND_MAX_PRICE = {
-    "tag heuer":   800_000,
-    "タグホイヤー": 800_000,
-    "bvlgari":     600_000,
-    "ブルガリ":    600_000,
-    "omega":       1_200_000,
-    "オメガ":      1_200_000,
-    "speedmaster": 1_200_000,
+# Tetos definidos em REAIS (R$) e convertidos para ienes automaticamente.
+# Para ajustar no futuro: mude só o valor em R$ aqui embaixo.
+BRAND_MAX_PRICE_BRL = {
+    "tag heuer":   4_200,
+    "タグホイヤー": 4_200,
+    "bvlgari":     4_500,
+    "ブルガリ":    4_500,
+    "omega":       8_000,
+    "オメガ":      8_000,
+    "speedmaster": 8_000,
 }
+BRAND_MAX_PRICE = {b: int(v / JPY_TO_BRL) for b, v in BRAND_MAX_PRICE_BRL.items()}
 
 GOOD_DEAL_THRESHOLD = 0.20   # 20% abaixo da média histórica
 
 KEYWORDS = [
-    "tag heuer","タグホイヤー","waz","caz",
-    "bvlgari","ブルガリ","al38",
-    "omega","オメガ","speedmaster","3513"
+    # Tag Heuer
+    "tag heuer","タグホイヤー","waz","caz","formula 1","waz1112",
+    # Bvlgari
+    "bvlgari","ブルガリ","al38","al38ta","ac38","ac38ta",
+    "aluminium","diagono","sd38",
+    # Omega
+    "omega","オメガ","speedmaster","3513",
 ]
 
 BAD_WORDS = [
@@ -142,6 +149,7 @@ BAD_WORDS = [
     "pen","seed","card","book","reading",
     "pokemon","yugioh","toy","figure",
     "ムーブメント","movement","リューズ","尾錠","バックル","buckle",
+    "al29","al32",   # tamanhos Bvlgari que o Ezi não trabalha (feminino/boys)
 ]
 
 # Lojas monitoradas via API stream
@@ -375,3 +383,4 @@ async def main():
     )
 
 asyncio.run(main())
+
