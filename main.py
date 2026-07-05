@@ -138,8 +138,8 @@ KEYWORDS = [
     # Bvlgari
     "bvlgari","ブルガリ","al38","al38ta","ac38","ac38ta",
     "aluminium","diagono","sd38",
-    # Omega
-    "omega","オメガ","speedmaster","3513",
+    # Omega — DESATIVADO a pedido do Ezi (remova os # para reativar)
+    # "omega","オメガ","speedmaster","3513",
 ]
 
 BAD_WORDS = [
@@ -150,6 +150,7 @@ BAD_WORDS = [
     "pokemon","yugioh","toy","figure",
     "ムーブメント","movement","リューズ","尾錠","バックル","buckle",
     "al29","al32",   # tamanhos Bvlgari que o Ezi não trabalha (feminino/boys)
+    "omega","オメガ","speedmaster",  # Omega 100% DESATIVADO — apague esta linha para reativar
 ]
 
 # Lojas monitoradas via API stream
@@ -383,4 +384,3 @@ async def main():
     )
 
 asyncio.run(main())
-
