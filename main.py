@@ -198,16 +198,26 @@ def good_deal_flags(keyword, price):
 
     return is_below_avg, is_below_max, pct
 
+# O título PRECISA conter pelo menos um destes termos (marca ou referência
+# do radar do Ezi). Substitui o antigo filtro de "palavra de relógio", que
+# barrava Tags legítimos (títulos japoneses sem 時計) e deixava passar
+# relógio aleatório de outras marcas.
+MUST_HAVE = [
+    # Tag Heuer
+    "tag heuer","タグホイヤー","タグ・ホイヤー","waz","caz",
+    "formula 1","formula1","フォーミュラ",
+    # Bvlgari
+    "bvlgari","ブルガリ","al38","ac38","sd38",
+    "aluminium","アルミニウム","diagono","ディアゴノ",
+]
+
 def valid(title, description, price):
-    """Mesma régua da v1, agora com descrição estruturada como apoio."""
+    """Filtro de qualidade: bloqueios + termo do radar + faixa de preço."""
     t = (title or "").lower()
-    d = (description or "").lower()
 
     if any(b in t for b in BAD_WORDS):
         return False
-    # v1 exigia palavra de relógio no título; agora aceita no título OU descrição
-    # (a API traz descrições completas, então isso reduz falsos negativos)
-    if not any(x in t + " " + d for x in ["watch", "時計", "腕時計"]):
+    if not any(m in t for m in MUST_HAVE):
         return False
     if not price:
         return False
@@ -280,7 +290,7 @@ def fetch_keyword(keyword):
     return zen_search(
         keyword,
         stores=MONITORED_STORES,
-        page_size=20,
+        page_size=50,   # busca mais fundo (antes 20 — deixava anúncio pra trás)
     )
 
 async def search_loop():
