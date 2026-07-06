@@ -136,8 +136,7 @@ KEYWORDS = [
     # Tag Heuer
     "タグホイヤー","waz","caz","formula 1","waz1112","waz1110"
     # Bvlgari
-    "bvlgari","ブルガリ","al38","al38ta","ac38","ac38ta",
-    "aluminium","diagono","sd38",
+    "bvlgari","ブルガリ","al38","al38ta","ac38","ac38ta", "diagono","sd38",
     # Omega — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "omega","オメガ","speedmaster","3513",
 ]
