@@ -134,7 +134,7 @@ GOOD_DEAL_THRESHOLD = 0.20   # 20% abaixo da média histórica
 
 KEYWORDS = [
     # Tag Heuer
-    "tag heuer","タグホイヤー","waz","caz","formula 1","waz1112",
+    "タグホイヤー","waz","caz","formula 1","waz1112","waz1110"
     # Bvlgari
     "bvlgari","ブルガリ","al38","al38ta","ac38","ac38ta",
     "aluminium","diagono","sd38",
