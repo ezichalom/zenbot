@@ -245,15 +245,8 @@ def build_link(product):
 # ─────────────────────────────────────────────
 async def send_new_item(product, keyword):
     price = product["price"]
-    is_below_avg, is_below_max, pct = good_deal_flags(keyword, price)
-
-    deal_tag = ""
-    if is_below_avg and is_below_max:
-        deal_tag = f"🟢 BOM NEGÓCIO — {int(pct*100)}% abaixo da média E dentro do teto!\n"
-    elif is_below_avg:
-        deal_tag = f"🟡 {int(pct*100)}% abaixo da média histórica\n"
-    elif is_below_max:
-        deal_tag = "🟡 Dentro do teto máximo por marca\n"
+    # Cálculo mantido por baixo (histórico/uso futuro), mas NÃO exibido na mensagem.
+    good_deal_flags(keyword, price)
 
     auction_info = ""
     if product.get("bids") is not None:
@@ -264,15 +257,25 @@ async def send_new_item(product, keyword):
     if product.get("auctionEndTime"):
         auction_info += f"🕐 Fim: {product['auctionEndTime']:%d/%m %H:%M} (JST)\n"
 
-    msg = (
+    link = build_link(product)
+    caption = (
         f"🔔 NOVO ANÚNCIO ({product['storeName'].upper()})\n"
-        f"{deal_tag}"
         f"\n⌚ {translate(product['title'])[:70]}\n"
         f"💰 {convert(price)}\n"
         f"{auction_info}"
-        f"🔗 {build_link(product)}\n"
+        f"🔗 {link}\n"
     )
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
+
+    # Tenta enviar com a foto do produto; se a imagem falhar, cai pra texto.
+    image_url = product.get("image")
+    if image_url:
+        try:
+            await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+            return
+        except Exception as e:
+            log.warning("Falha ao enviar foto (%s); enviando só texto.", e)
+
+    await bot.send_message(chat_id=CHAT_ID, text=caption)
 
 async def send_auction_ending(item_row, hours_left):
     id_, title, price, end_time, link, *_ = item_row
