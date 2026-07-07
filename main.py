@@ -120,8 +120,8 @@ JPY_TO_BRL = 0.035
 # Tetos definidos em REAIS (R$) e convertidos para ienes automaticamente.
 # Para ajustar no futuro: mude só o valor em R$ aqui embaixo.
 BRAND_MAX_PRICE_BRL = {
-    "tag heuer":   4_200,
-    "タグホイヤー": 4_200,
+    "tag heuer":   5_500,
+    "タグホイヤー": 5_500,
     "bvlgari":     4_500,
     "ブルガリ":    4_500,
     "omega":       8_000,
@@ -148,7 +148,12 @@ BAD_WORDS = [
     "pen","seed","card","book","reading",
     "pokemon","yugioh","toy","figure",
     "ムーブメント","movement","リューズ","尾錠","バックル","buckle",
-    "al29","al32",   # tamanhos Bvlgari que o Ezi não trabalha (feminino/boys)
+    "al29","al32",
+    # Não-relógios / linhas indesejadas que colavam pela marca:
+    "óculos","oculos","sunglass","sunglasses","メガネ","眼鏡","サングラス",
+    "conectado","connected","スマートウォッチ","smartwatch",
+    "strass","ネックレス","necklace","指輪","ring","earring","ピアス","イヤリング",
+    "bag","バッグ","財布","wallet","香水","perfume","キーホルダー",   # tamanhos Bvlgari que o Ezi não trabalha (feminino/boys)
     "omega","オメガ","speedmaster",  # Omega 100% DESATIVADO — apague esta linha para reativar
 ]
 
@@ -202,9 +207,9 @@ def good_deal_flags(keyword, price):
 # barrava Tags legítimos (títulos japoneses sem 時計) e deixava passar
 # relógio aleatório de outras marcas.
 MUST_HAVE = [
-    # Tag Heuer
-    "tag heuer","タグホイヤー","タグ・ホイヤー","waz","caz",
-    "formula 1","formula1","フォーミュラ",
+    # Tag Heuer — SOMENTE Formula 1 (WAZ/CAZ). "tag heuer" sozinho não basta,
+    # para cortar Carrera/Aquaracer/Professional(WG)/Connected.
+    "waz","caz","formula 1","formula1","フォーミュラ",
     # Bvlgari
     "bvlgari","ブルガリ","al38","ac38","sd38",
     "aluminium","アルミニウム","diagono","ディアゴノ",
