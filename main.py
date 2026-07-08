@@ -121,7 +121,7 @@ JPY_TO_BRL = 0.035
 # Para ajustar no futuro: mude só o valor em R$ aqui embaixo.
 BRAND_MAX_PRICE_BRL = {
     "tag heuer":   4_200,
-    "タグホイヤー": 5_500,
+    "タグホイヤー": 4_200,
     "bvlgari":     4_500,
     "ブルガリ":    4_500,
     "omega":       8_000,
@@ -178,10 +178,18 @@ def translate(t):
     except Exception:
         return t
 
+# Referência no título já identifica a marca — assim o teto se aplica
+# mesmo quando o vendedor não escreve o nome da marca (ex.: "CAZ1010 クロノ").
+BRAND_PATTERNS = {
+    "tag heuer": ["tag heuer","タグホイヤー","waz","caz","formula","フォーミュラ"],
+    "bvlgari":   ["bvlgari","ブルガリ","al38","ac38","sd38",
+                  "aluminium","アルミニウム","diagono","ディアゴノ","dg"],
+}
+
 def get_brand(title):
     t = title.lower()
-    for brand in BRAND_MAX_PRICE:
-        if brand in t:
+    for brand, tokens in BRAND_PATTERNS.items():
+        if any(tok in t for tok in tokens):
             return brand
     return None
 
@@ -305,11 +313,20 @@ async def send_auction_ending(item_row, hours_left):
 # BUSCA VIA API STREAM (substitui mercari() e yahoo())
 # ─────────────────────────────────────────────
 def fetch_keyword(keyword):
-    """Chamada síncrona à API stream — roda em thread pra não travar o loop."""
+    """Chamada síncrona à API stream — roda em thread pra não travar o loop.
+
+    O filtro de preço vai DIRETO na API (minPrice/maxPrice): as 50 vagas de
+    resultado voltam 100% dentro da faixa do Ezi, sem desperdiçar slot com
+    relógio caro demais ou acessório barato.
+    """
+    brand = get_brand(keyword)
+    max_p = BRAND_MAX_PRICE.get(brand) if brand else None
     return zen_search(
         keyword,
         stores=MONITORED_STORES,
-        page_size=50,   # busca mais fundo (antes 20 — deixava anúncio pra trás)
+        page_size=50,
+        min_price=20_000,
+        max_price=max_p,
     )
 
 async def search_loop():
