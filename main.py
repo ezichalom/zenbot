@@ -52,6 +52,7 @@ conn   = sqlite3.connect("seen.db")
 cursor = conn.cursor()
 
 cursor.execute("CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)")
+cursor.execute("CREATE TABLE IF NOT EXISTS seen_content (fp TEXT PRIMARY KEY)")
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS auctions (
         id        TEXT PRIMARY KEY,
@@ -79,12 +80,36 @@ cursor.execute("""
 """)
 conn.commit()
 
+import hashlib as _hashlib
+
+def content_fingerprint(title, price):
+    """Impressão digital do anúncio para deduplicar o MESMO relógio
+    anunciado em várias lojas (Rakuten/Rakuma/Mercari costumam repetir).
+
+    - título normalizado: minúsculo, só letras/números (remove espaços,
+      pontuação e quebras que variam entre plataformas)
+    - preço arredondado pra faixa de ¥1.000 (pequenas diferenças de taxa
+      entre lojas não quebram o match)
+    """
+    t = "".join(ch for ch in (title or "").lower() if ch.isalnum())
+    faixa = (price or 0) // 1000
+    base = f"{t}|{faixa}"
+    return _hashlib.md5(base.encode("utf-8")).hexdigest()
+
 def seen(i):
     cursor.execute("SELECT 1 FROM seen WHERE id=?", (i,))
     return cursor.fetchone()
 
 def save(i):
     cursor.execute("INSERT OR IGNORE INTO seen VALUES (?)", (i,))
+    conn.commit()
+
+def seen_content_fp(fp):
+    cursor.execute("SELECT 1 FROM seen_content WHERE fp=?", (fp,))
+    return cursor.fetchone()
+
+def save_content_fp(fp):
+    cursor.execute("INSERT OR IGNORE INTO seen_content VALUES (?)", (fp,))
     conn.commit()
 
 def save_price_history(keyword, price, source):
@@ -405,7 +430,16 @@ async def search_loop():
                         save_price_history(k, p["price"], source)
                     continue
 
+                # Dedup por CONTEÚDO: mesmo relógio em outra loja = não repete.
+                # (Leilões do Yahoo escapam da dedup: cada leilão é único e o
+                #  lance muda, então continuam alertando normalmente.)
+                fp = content_fingerprint(p["title"], p["price"])
+                if source != "yahooauction" and seen_content_fp(fp):
+                    save(uid)  # marca o sku pra não reprocessar, mas não alerta
+                    continue
+
                 save(uid)
+                save_content_fp(fp)
                 save_price_history(k, p["price"], source)
 
                 # EndTime nativo da API → salva pro monitor de leilões
