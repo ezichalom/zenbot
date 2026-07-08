@@ -120,7 +120,7 @@ JPY_TO_BRL = 0.035
 # Tetos definidos em REAIS (R$) e convertidos para ienes automaticamente.
 # Para ajustar no futuro: mude só o valor em R$ aqui embaixo.
 BRAND_MAX_PRICE_BRL = {
-    "tag heuer":   5_500,
+    "tag heuer":   4_200,
     "タグホイヤー": 5_500,
     "bvlgari":     4_500,
     "ブルガリ":    4_500,
@@ -134,9 +134,9 @@ GOOD_DEAL_THRESHOLD = 0.20   # 20% abaixo da média histórica
 
 KEYWORDS = [
     # Tag Heuer
-    "タグホイヤー","waz","caz","formula 1","waz1112","waz1110"
+    "タグホイヤー","waz","caz","formula 1","waz1112","waz1110","caz1010",
     # Bvlgari
-    "bvlgari","ブルガリ","al38","al38ta","ac38","ac38ta", "diagono","sd38",
+    "ブルガリ","al38","al38ta","ac38","ac38ta", "diagono","sd38","Dg"
     # Omega — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "omega","オメガ","speedmaster","3513",
 ]
@@ -264,9 +264,13 @@ async def send_new_item(product, keyword):
     link = build_link(product)
     caption = (
         f"🔔 NOVO ANÚNCIO ({product['storeName'].upper()})\n"
+        
         f"\n⌚ {translate(product['title'])[:70]}\n"
+        
         f"💰 {convert(price)}\n"
+        
         f"{auction_info}"
+        
         f"🔗 {link}\n"
     )
 
@@ -286,9 +290,13 @@ async def send_auction_ending(item_row, hours_left):
     emoji = "🚨" if hours_left <= 1 else "⏰"
     msg = (
         f"{emoji} LEILÃO ENCERRANDO EM {hours_left}H\n"
-        f"\n⌚ {translate(title)[:70]}\n"
+        
+        f"\n {translate(title)[:70]}\n"
+        
         f"💰 Lance atual: {convert(price)}\n"
+        
         f"🕐 Fim: {end_time}\n"
+        
         f"🔗 {link}\n"
     )
     await bot.send_message(chat_id=CHAT_ID, text=msg)
