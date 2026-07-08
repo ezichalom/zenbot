@@ -149,6 +149,10 @@ BAD_WORDS = [
     "pokemon","yugioh","toy","figure",
     "ムーブメント","movement","リューズ","尾錠","バックル","buckle",
     "al29","al32",
+    # Relógios femininos / boys (títulos originais em japonês — "feminino"
+    # só aparece depois da tradução, por isso bloqueamos os termos de origem):
+    "レディース","レディス","ladies","lady's","ladys","女性用","婦人",
+    "ボーイズ","boys",
     # Não-relógios / linhas indesejadas que colavam pela marca:
     "óculos","oculos","sunglass","sunglasses","メガネ","眼鏡","サングラス",
     "conectado","connected","スマートウォッチ","smartwatch",
