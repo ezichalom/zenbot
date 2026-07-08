@@ -126,8 +126,8 @@ JPY_TO_BRL = 0.035
 # Tetos definidos em REAIS (R$) e convertidos para ienes automaticamente.
 # Para ajustar no futuro: mude só o valor em R$ aqui embaixo.
 BRAND_MAX_PRICE_BRL = {
-    "tag heuer":   4_200,
-    "タグホイヤー": 4_200,
+    "tag heuer":   3_950,
+    "タグホイヤー": 3_950,
     "bvlgari":     4_500,
     "ブルガリ":    4_500,
     "omega":       8_000,
@@ -170,7 +170,19 @@ BAD_WORDS = [
 ]
 
 # Lojas monitoradas via API stream
-MONITORED_STORES = [STORE["Mercari"], STORE["YahooAuction"]]
+# Todas as lojas disponíveis (IDs descobertos na engenharia reversa).
+# Para parar de monitorar alguma, comente a linha correspondente.
+MONITORED_STORES = [
+    STORE["Rakuten"],       # 0
+    STORE["YahooShopping"], # 18
+    STORE["Rakuma"],        # 25
+    STORE["ZenPlus"],       # 26
+    STORE["Mercari"],       # 27
+    STORE["YahooAuction"],  # 28
+    STORE["SnkrDunk"],      # 53
+    STORE["Ragtag"],        # 57
+    STORE["BrandOff"],      # 63
+]
 
 # ─────────────────────────────────────────────
 # UTILITÁRIOS
@@ -310,6 +322,7 @@ async def send_new_item(product, keyword):
         f"{auction_info}"
         
         f"🔗 {link}\n"
+        f"\n━━━━━━━━━━\n"   # separador entre anúncios
     )
 
     # Tenta enviar com a foto do produto; se a imagem falhar, cai pra texto.
@@ -336,6 +349,7 @@ async def send_auction_ending(item_row, hours_left):
         f"🕐 Fim: {end_time}\n"
         
         f"🔗 {link}\n"
+        f"\n━━━━━━━━━━\n"   # separador entre anúncios
     )
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
