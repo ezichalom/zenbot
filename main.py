@@ -187,9 +187,8 @@ BRAND_PATTERNS = {
 }
 
 def get_brand(title):
-    t = title.lower()
     for brand, tokens in BRAND_PATTERNS.items():
-        if any(tok in t for tok in tokens):
+        if token_in(title, tokens):
             return brand
     return None
 
@@ -218,6 +217,33 @@ def good_deal_flags(keyword, price):
 # do radar do Ezi). Substitui o antigo filtro de "palavra de relógio", que
 # barrava Tags legítimos (títulos japoneses sem 時計) e deixava passar
 # relógio aleatório de outras marcas.
+
+import re as _re
+
+def _token_regex(tok):
+    """Casa o token respeitando fronteiras:
+    - nada de letra/número latino colado ANTES (mata PSD38G → sd38)
+    - se o token termina em dígito, nada de dígito colado DEPOIS
+      (mata SD3818013 → sd38), mas letras são OK (SD38S, AL38TA)
+    - se termina em letra (waz, caz), dígitos depois são esperados (WAZ1110)
+    """
+    esc = _re.escape(tok.lower())
+    prefix = r"(?<![a-z0-9])"
+    suffix = r"(?![0-9])" if tok[-1].isdigit() else ""
+    return _re.compile(prefix + esc + suffix)
+
+_MATCH_CACHE = {}
+
+def token_in(text, tokens):
+    t = text.lower()
+    for tok in tokens:
+        rx = _MATCH_CACHE.get(tok)
+        if rx is None:
+            rx = _MATCH_CACHE[tok] = _token_regex(tok)
+        if rx.search(t):
+            return True
+    return False
+
 MUST_HAVE = [
     # Tag Heuer — SOMENTE Formula 1 (WAZ/CAZ). "tag heuer" sozinho não basta,
     # para cortar Carrera/Aquaracer/Professional(WG)/Connected.
@@ -233,7 +259,7 @@ def valid(title, description, price):
 
     if any(b in t for b in BAD_WORDS):
         return False
-    if not any(m in t for m in MUST_HAVE):
+    if not token_in(t, MUST_HAVE):
         return False
     if not price:
         return False
