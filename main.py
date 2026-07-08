@@ -64,6 +64,12 @@ cursor.execute("""
     )
 """)
 cursor.execute("""
+    CREATE TABLE IF NOT EXISTS watch_prices (
+        sku        TEXT PRIMARY KEY,
+        last_price INTEGER
+    )
+""")
+cursor.execute("""
     CREATE TABLE IF NOT EXISTS price_history (
         keyword TEXT,
         price   INTEGER,
@@ -133,10 +139,12 @@ BRAND_MAX_PRICE = {b: int(v / JPY_TO_BRL) for b, v in BRAND_MAX_PRICE_BRL.items(
 GOOD_DEAL_THRESHOLD = 0.20   # 20% abaixo da média histórica
 
 KEYWORDS = [
-    # Tag Heuer
-    "タグホイヤー","waz","caz","formula 1","waz1112","waz1110","caz1010",
-    # Bvlgari
-    "ブルガリ","al38","al38ta","ac38","ac38ta", "diagono","sd38","Dg"
+    # Tag Heuer — só Formula 1
+    "タグホイヤー フォーミュラ1","tag heuer formula 1",
+    "tag heuer waz","tag heuer caz","waz1112","waz1110","caz1010",
+    # Bvlgari — sempre MARCA + referência (evita código de peça e porcaria)
+    "bvlgari al38","bvlgari ac38","bvlgari sd38",
+    "bvlgari diagono","bvlgari aluminium","ブルガリ アルミニウム",
     # Omega — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "omega","オメガ","speedmaster","3513",
 ]
@@ -221,12 +229,8 @@ def good_deal_flags(keyword, price):
 import re as _re
 
 def _token_regex(tok):
-    """Casa o token respeitando fronteiras:
-    - nada de letra/número latino colado ANTES (mata PSD38G → sd38)
-    - se o token termina em dígito, nada de dígito colado DEPOIS
-      (mata SD3818013 → sd38), mas letras são OK (SD38S, AL38TA)
-    - se termina em letra (waz, caz), dígitos depois são esperados (WAZ1110)
-    """
+    """Casa token respeitando fronteiras: nada de letra/número latino antes;
+    se o token termina em dígito, nada de dígito depois (letras OK: AL38TA)."""
     esc = _re.escape(tok.lower())
     prefix = r"(?<![a-z0-9])"
     suffix = r"(?![0-9])" if tok[-1].isdigit() else ""
@@ -406,6 +410,71 @@ async def search_loop():
         log.info("Ciclo completo. Próximo em %ss.", POLL_INTERVAL)
         await asyncio.sleep(POLL_INTERVAL)
 
+
+# ─────────────────────────────────────────────
+# WATCHLIST — itens específicos vigiados p/ QUEDA DE PREÇO
+# (fora do funil normal: sem filtros de marca/teto; qualquer queda alerta)
+# ─────────────────────────────────────────────
+WATCHLIST = [
+    {
+        "label": "Tudor Hydronaut (Rakuma)",
+        "query": "tudor hydronaut",
+        "store": STORE["Rakuma"],
+        "sku":   "c490e86d913735b1c55b826278c95e75",
+    },
+]
+
+def get_watch_price(sku):
+    cursor.execute("SELECT last_price FROM watch_prices WHERE sku=?", (sku,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def set_watch_price(sku, price):
+    cursor.execute("INSERT OR REPLACE INTO watch_prices VALUES (?,?)", (sku, price))
+    conn.commit()
+
+async def watchlist_loop():
+    """Vigia os itens da WATCHLIST a cada 30 min e alerta em QUALQUER queda."""
+    while True:
+        for item in WATCHLIST:
+            try:
+                produtos = await asyncio.to_thread(
+                    zen_search, item["query"],
+                    stores=[item["store"]], page_size=50,
+                )
+            except Exception as e:
+                log.warning("Watchlist: busca falhou para %r: %s", item["label"], e)
+                continue
+
+            achado = next((p for p in produtos if p["sku"] == item["sku"]), None)
+            if achado is None:
+                log.info("Watchlist: %s não apareceu na busca (vendido? fora do top 50?).",
+                         item["label"])
+                continue
+
+            preco_atual  = achado["price"]
+            preco_antigo = get_watch_price(item["sku"])
+
+            if preco_antigo is None:
+                set_watch_price(item["sku"], preco_atual)
+                log.info("Watchlist: %s registrado a ¥%s.", item["label"], f"{preco_atual:,}")
+            elif preco_atual < preco_antigo:
+                msg = (
+                    f"💸 BAIXOU DE PREÇO — {item['label']}\n"
+                    f"\n⌚ {translate(achado['title'])[:70]}\n"
+                    f"📉 De ¥{preco_antigo:,} por ¥{preco_atual:,} "
+                    f"(−¥{preco_antigo - preco_atual:,})\n"
+                    f"💰 Agora: {convert(preco_atual)}\n"
+                    f"🔗 {achado.get('url') or ''}\n"
+                )
+                await bot.send_message(chat_id=CHAT_ID, text=msg)
+                set_watch_price(item["sku"], preco_atual)
+            elif preco_atual > preco_antigo:
+                set_watch_price(item["sku"], preco_atual)  # subiu: atualiza base
+
+        await asyncio.sleep(1_800)  # 30 min
+
+
 # ─────────────────────────────────────────────
 # MONITOR DE LEILÕES (idêntico à v1)
 # ─────────────────────────────────────────────
@@ -453,6 +522,7 @@ async def main():
     await asyncio.gather(
         search_loop(),
         auction_monitor_loop(),
+        watchlist_loop(),
     )
 
 asyncio.run(main())
