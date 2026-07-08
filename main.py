@@ -181,8 +181,8 @@ def translate(t):
 # Referência no título já identifica a marca — assim o teto se aplica
 # mesmo quando o vendedor não escreve o nome da marca (ex.: "CAZ1010 クロノ").
 BRAND_PATTERNS = {
-    "tag heuer": ["tag heuer","タグホイヤー","waz","caz","formula","フォーミュラ"],
-    "bvlgari":   ["bvlgari","ブルガリ","al38","ac38","sd38",
+    "tag heuer": ["タグホイヤー","waz","caz","formula","フォーミュラ"],
+    "bvlgari":   ["ブルガリ","al38","ac38","sd38",
                   "aluminium","アルミニウム","diagono","ディアゴノ","dg"],
 }
 
