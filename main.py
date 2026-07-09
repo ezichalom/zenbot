@@ -53,6 +53,7 @@ cursor = conn.cursor()
 
 cursor.execute("CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)")
 cursor.execute("CREATE TABLE IF NOT EXISTS seen_content (fp TEXT PRIMARY KEY)")
+cursor.execute("CREATE TABLE IF NOT EXISTS sku_prices (uid TEXT PRIMARY KEY, price INTEGER)")
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS auctions (
         id        TEXT PRIMARY KEY,
@@ -110,6 +111,15 @@ def seen_content_fp(fp):
 
 def save_content_fp(fp):
     cursor.execute("INSERT OR IGNORE INTO seen_content VALUES (?)", (fp,))
+    conn.commit()
+
+def get_sku_price(uid):
+    cursor.execute("SELECT price FROM sku_prices WHERE uid=?", (uid,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def set_sku_price(uid, price):
+    cursor.execute("INSERT OR REPLACE INTO sku_prices VALUES (?,?)", (uid, price))
     conn.commit()
 
 def save_price_history(keyword, price, source):
@@ -322,6 +332,31 @@ def build_link(product):
 # ─────────────────────────────────────────────
 # TELEGRAM — MENSAGENS
 # ─────────────────────────────────────────────
+async def send_price_drop(product, old_price):
+    """Alerta quando um relógio JÁ VISTO baixa de preço (qualquer queda >= 1)."""
+    new_price = product["price"]
+    diff = old_price - new_price
+    pct = (diff / old_price * 100) if old_price else 0
+    link = build_link(product)
+    caption = (
+        f"💸 BAIXOU DE PREÇO ({product['storeName'].upper()})\n"
+        f"\n⌚ {translate(product['title'])[:70]}\n"
+        f"📉 De ¥{old_price:,} por ¥{new_price:,} "
+        f"(−¥{diff:,} · −{pct:.1f}%)\n"
+        f"💰 Agora: {convert(new_price)}\n"
+        f"🔗 {link}\n"
+        f"\n━━━━━━━━━━\n"
+    )
+    image_url = product.get("image")
+    if image_url:
+        try:
+            await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+            return
+        except Exception as e:
+            log.warning("Falha ao enviar foto da queda (%s); só texto.", e)
+    await bot.send_message(chat_id=CHAT_ID, text=caption)
+
+
 async def send_new_item(product, keyword):
     price = product["price"]
     # Cálculo mantido por baixo (histórico/uso futuro), mas NÃO exibido na mensagem.
@@ -425,9 +460,19 @@ async def search_loop():
                 source = p["storeName"].lower()
 
                 if seen(uid):
-                    # Leilões: lances sobem, atualiza histórico mesmo já visto
+                    # Leilões: lance sobe, não é "queda"; só atualiza histórico.
                     if source == "yahooauction":
                         save_price_history(k, p["price"], source)
+                        continue
+                    # Preço fixo já visto: compara com o último preço registrado.
+                    prev = get_sku_price(uid)
+                    if prev is not None and p["price"] < prev:
+                        await send_price_drop(p, prev)
+                        set_sku_price(uid, p["price"])
+                        save_price_history(k, p["price"], source)
+                        await asyncio.sleep(1)
+                    elif prev is None or p["price"] != prev:
+                        set_sku_price(uid, p["price"])  # registra/atualiza base
                     continue
 
                 # Dedup por CONTEÚDO: mesmo relógio em outra loja = não repete.
@@ -440,6 +485,7 @@ async def search_loop():
 
                 save(uid)
                 save_content_fp(fp)
+                set_sku_price(uid, p["price"])   # base para detectar quedas futuras
                 save_price_history(k, p["price"], source)
 
                 # EndTime nativo da API → salva pro monitor de leilões
