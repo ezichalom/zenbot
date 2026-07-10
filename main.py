@@ -41,7 +41,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 # Intervalo entre ciclos completos de busca (segundos).
 # 300s = 5 min. Configurável via variável de ambiente no Railway.
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "300"))
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "600"))  # 10 min — economiza CPU no Railway
 
 bot = Bot(token=TOKEN)
 
