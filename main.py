@@ -185,12 +185,11 @@ KEYWORDS = [
 ]
 
 BAD_WORDS = [
-    "belt","strap","ベルト","band","バンド",
     "parts","部品","box","case","empty","箱のみ",
     "manual","冊子","only","のみ",
     "pen","seed","card","book","reading",
     "pokemon","yugioh","toy","figure",
-    "ムーブメント","movement","リューズ","尾錠","バックル","buckle",
+    "ムーブメント","movement","リューズ",
     "al29","al32",
     # Relógios femininos / boys (títulos originais em japonês — "feminino"
     # só aparece depois da tradução, por isso bloqueamos os termos de origem):
@@ -304,11 +303,23 @@ MUST_HAVE = [
     "aluminium","アルミニウム","diagono","ディアゴノ",
 ]
 
+# Termos de PULSEIRA/acessório de pulso: só bloqueiam se o anúncio NÃO tiver
+# sinal forte de relógio. O Bvlgari Aluminium cita "ラバーベルト" (pulseira de
+# borracha) no título — não podemos barrar o relógio por causa disso.
+STRAP_WORDS = ["belt","strap","ベルト","band","バンド","尾錠","バックル","buckle"]
+
+# Sinal forte de relógio real (marca+ref ou a palavra "relógio" em japonês):
+WATCH_SIGNAL = ["al38","ac38","sd38","waz","caz","aluminium","アルミニウム",
+                "diagono","ディアゴノ","腕時計","自動巻","クォーツ","デイト"]
+
 def valid(title, description, price):
     """Filtro de qualidade: bloqueios + termo do radar + faixa de preço."""
     t = (title or "").lower()
 
     if any(b in t for b in BAD_WORDS):
+        return False
+    # Pulseira/acessório: bloqueia só se NÃO houver sinal de relógio real.
+    if any(sw in t for sw in STRAP_WORDS) and not any(ws in t for ws in WATCH_SIGNAL):
         return False
     if not token_in(t, MUST_HAVE):
         return False
