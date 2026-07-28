@@ -14,7 +14,16 @@ Uso rápido:
 Dependências:
     pip install requests
     # Se o Cloudflare bloquear no Railway (403/503), troque para:
-    # pip install curl_cffi   e use   from curl_cffi import requests
+    # pip install curl_cffi   e use   from curl_cffi # Preferimos curl_cffi: imita a impressão digital TLS/JA3 de um navegador
+# real, o que costuma passar pelo Cloudflare (que bloqueia o requests puro
+# com 403). Se a lib não estiver instalada, cai para requests normal.
+try:
+    from curl_cffi import requests as _cffi_requests
+    _HAS_CFFI = True
+except Exception:
+    _HAS_CFFI = False
+
+import requests
 """
 
 from __future__ import annotations
@@ -192,17 +201,29 @@ def stream_search(
     Executa a busca e produz eventos SSE crus (event_name, data).
     Útil se você quiser reagir loja por loja em tempo real.
     """
-    sess = session or requests.Session()
     payload = build_payload(query, stores, page, page_size, min_price, max_price)
 
-    resp = sess.post(
-        SEARCH_URL,
-        params={"stream": "1"},
-        json=payload,
-        headers=DEFAULT_HEADERS,
-        stream=True,
-        timeout=timeout,
-    )
+    if _HAS_CFFI:
+        # impersonate="chrome" replica o handshake TLS do Chrome → passa no Cloudflare
+        resp = _cffi_requests.post(
+            SEARCH_URL,
+            params={"stream": "1"},
+            json=payload,
+            headers=DEFAULT_HEADERS,
+            stream=True,
+            timeout=timeout,
+            impersonate="chrome",
+        )
+    else:
+        sess = session or requests.Session()
+        resp = sess.post(
+            SEARCH_URL,
+            params={"stream": "1"},
+            json=payload,
+            headers=DEFAULT_HEADERS,
+            stream=True,
+            timeout=timeout,
+        )
     resp.raise_for_status()
 
     ctype = resp.headers.get("Content-Type", "")
