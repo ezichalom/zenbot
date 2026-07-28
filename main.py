@@ -174,10 +174,9 @@ BRAND_MAX_PRICE = {b: int(v / JPY_TO_BRL) for b, v in BRAND_MAX_PRICE_BRL.items(
 GOOD_DEAL_THRESHOLD = 0.20   # 20% abaixo da média histórica
 
 KEYWORDS = [
-    # Tag Heuer — só referências WAZ/CAZ (Formula 1 modernos).
-    # Removido "formula 1"/"フォーミュラ1" solto: traziam a série WA antiga.
-    "tag heuer waz","tag heuer caz",
-    "waz1112","waz1110","caz1010","caz1011","waz111",
+    # Tag Heuer — só Formula 1
+    "タグホイヤー フォーミュラ1","tag heuer formula 1",
+    "tag heuer waz","tag heuer caz","waz1112","waz1110","caz1010",
     # Bvlgari — sempre MARCA + referência (evita código de peça e porcaria)
     "bvlgari al38","bvlgari ac38","bvlgari sd38",
     "bvlgari diagono","bvlgari aluminium","ブルガリ アルミニウム",
@@ -236,7 +235,7 @@ def translate(t):
 # Referência no título já identifica a marca — assim o teto se aplica
 # mesmo quando o vendedor não escreve o nome da marca (ex.: "CAZ1010 クロノ").
 BRAND_PATTERNS = {
-    "tag heuer": ["タグホイヤー","waz","caz"],
+    "tag heuer": ["タグホイヤー","waz","caz","formula","フォーミュラ"],
     "bvlgari":   ["ブルガリ","al38","ac38","sd38",
                   "aluminium","アルミニウム","diagono","ディアゴノ","dg"],
 }
@@ -296,10 +295,9 @@ def token_in(text, tokens):
     return False
 
 MUST_HAVE = [
-    # Tag Heuer — SOMENTE as referências WAZ e CAZ (Formula 1 modernos).
-    # "formula 1" solto foi REMOVIDO: trazia a série WA antiga (WA1214,
-    # WA1417, WA1210 — quartz baratos que o Ezi não quer).
-    "waz","caz",
+    # Tag Heuer — SOMENTE Formula 1 (WAZ/CAZ). "tag heuer" sozinho não basta,
+    # para cortar Carrera/Aquaracer/Professional(WG)/Connected.
+    "waz","caz","formula 1","formula1","フォーミュラ",
     # Bvlgari
     "bvlgari","ブルガリ","al38","ac38","sd38",
     "aluminium","アルミニウム","diagono","ディアゴノ",
@@ -314,7 +312,7 @@ STRAP_WORDS = ["belt","strap","ベルト","band","バンド","尾錠","バック
 WATCH_SIGNAL = ["al38","ac38","sd38","waz","caz","aluminium","アルミニウム",
                 "diagono","ディアゴノ","腕時計","自動巻","クォーツ","デイト"]
 
-def valid(title, description, price, is_auction=False):
+def valid(title, description, price):
     """Filtro de qualidade: bloqueios + termo do radar + faixa de preço."""
     t = (title or "").lower()
 
@@ -327,9 +325,7 @@ def valid(title, description, price, is_auction=False):
         return False
     if not price:
         return False
-    # Piso anti-acessório só para PREÇO FIXO. Em leilão, o lance começa baixo
-    # (1円スタート) e o que vale é a referência do relógio no título.
-    if not is_auction and price < 20_000:
+    if price < 20_000:
         return False
     if is_above_max_price(title, price):
         return False
@@ -440,13 +436,11 @@ def fetch_keyword(keyword):
     """
     brand = get_brand(keyword)
     max_p = BRAND_MAX_PRICE.get(brand) if brand else None
-    # min_price=None: NÃO cortamos por piso na API, senão leilões "1円スタート"
-    # (lance inicial de ¥1) nem apareceriam. O piso vira condicional no valid().
     return zen_search(
         keyword,
         stores=MONITORED_STORES,
         page_size=50,
-        min_price=None,
+        min_price=20_000,
         max_price=max_p,
     )
 
@@ -470,11 +464,11 @@ async def search_loop():
                 continue
 
             for p in products:
+                if not valid(p["title"], p["raw"].get("description", ""), p["price"]):
+                    continue
+
                 uid    = f'{p["storeName"]}:{p["sku"]}'
                 source = p["storeName"].lower()
-
-                if not valid(p["title"], p["raw"].get("description", ""), p["price"], is_auction=(source == "yahooauction")):
-                    continue
 
                 if seen(uid):
                     # Leilões: lance sobe, não é "queda"; só atualiza histórico.
