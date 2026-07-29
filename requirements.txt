@@ -3,3 +3,4 @@ requests
 beautifulsoup4
 deep-translator
 curl_cffi
+playwright==1.48.0

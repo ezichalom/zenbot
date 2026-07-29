@@ -209,6 +209,123 @@ def iter_sse_events(response: requests.Response) -> Iterator[tuple[str, dict]]:
             yield event_name, payload
 
 
+# Navegador persistente reaproveitado entre buscas (abre 1x, resolve Cloudflare
+# 1x, reusa para todas as keywords do ciclo — muito mais leve e rápido).
+_PW = None          # handle do sync_playwright
+_BROWSER = None
+_CONTEXT = None
+_CF_OK = False      # já passou pelo desafio Cloudflare nesta sessão?
+
+
+def _proxy_dict():
+    if not _PROXY_URL:
+        return None
+    import re
+    m = re.match(r"https?://(?:([^:@]+):([^@]+)@)?([^:/]+):(\d+)", _PROXY_URL)
+    if not m:
+        return None
+    user, pw, host, port = m.group(1), m.group(2), m.group(3), m.group(4)
+    d = {"server": f"http://{host}:{port}"}
+    if user:
+        d["username"], d["password"] = user, pw
+    return d
+
+
+def _ensure_browser():
+    """Garante navegador aberto e com Cloudflare resolvido (reaproveitável)."""
+    global _PW, _BROWSER, _CONTEXT, _CF_OK
+    from playwright.sync_api import sync_playwright
+
+    if _CONTEXT is not None:
+        return _CONTEXT
+
+    _PW = sync_playwright().start()
+    _BROWSER = _PW.chromium.launch(
+        headless=True,
+        proxy=_proxy_dict(),
+        args=["--no-sandbox", "--disable-blink-features=AutomationControlled",
+              "--disable-dev-shm-usage"],
+    )
+    _CONTEXT = _BROWSER.new_context(
+        locale="pt-BR",
+        user_agent=DEFAULT_HEADERS["User-Agent"],
+        viewport={"width": 1366, "height": 768},
+    )
+    # Resolve o Cloudflare UMA vez, carregando a home.
+    page = _CONTEXT.new_page()
+    try:
+        page.goto("https://zenmarket.jp/pt/", wait_until="domcontentloaded", timeout=90000)
+        for _ in range(30):
+            t = (page.title() or "").lower()
+            if "just a moment" not in t and "attention" not in t:
+                _CF_OK = True
+                break
+            page.wait_for_timeout(1000)
+    finally:
+        page.close()
+    return _CONTEXT
+
+
+def _close_browser():
+    """Fecha o navegador (chamado se algo der errado, pra reabrir limpo)."""
+    global _PW, _BROWSER, _CONTEXT, _CF_OK
+    try:
+        if _CONTEXT: _CONTEXT.close()
+        if _BROWSER: _BROWSER.close()
+        if _PW: _PW.stop()
+    except Exception:
+        pass
+    _PW = _BROWSER = _CONTEXT = None
+    _CF_OK = False
+
+
+def _run_stream_via_browser(payload: dict, timeout: int = 90) -> str:
+    """
+    Dispara o fetch() da API SSE de dentro do navegador persistente (que já
+    passou pelo Cloudflare). Reabre o navegador uma vez se a sessão cair.
+    """
+    body_json = json.dumps(payload)
+    js = """
+    async (payloadStr) => {
+        const resp = await fetch("/pt/search.aspx?stream=1", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: payloadStr
+        });
+        if (!resp.ok) return "HTTP_ERROR_" + resp.status;
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let out = "";
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            out += decoder.decode(value, {stream: true});
+        }
+        return out;
+    }
+    """
+    for tentativa in (1, 2):   # 1 retry: se a sessão caiu, reabre e tenta de novo
+        try:
+            ctx = _ensure_browser()
+            page = ctx.new_page()
+            try:
+                page.goto("https://zenmarket.jp/pt/search.aspx",
+                          wait_until="domcontentloaded", timeout=timeout * 1000)
+                result = page.evaluate(js, body_json)
+                return result or ""
+            finally:
+                page.close()
+        except Exception as e:
+            log.warning("Browser falhou (tentativa %d): %s", tentativa, e)
+            _close_browser()
+            if tentativa == 2:
+                raise
+    return ""
+
 def stream_search(
     query: str,
     stores: Optional[list[int]] = None,
@@ -216,65 +333,40 @@ def stream_search(
     page_size: int = 20,
     min_price: Optional[int] = None,
     max_price: Optional[int] = None,
-    session: Optional[requests.Session] = None,
-    timeout: int = 60,
+    session=None,
+    timeout: int = 90,
 ) -> Iterator[tuple[str, dict]]:
     """
-    Executa a busca e produz eventos SSE crus (event_name, data).
-    Útil se você quiser reagir loja por loja em tempo real.
+    Executa a busca via navegador (Playwright) e produz eventos SSE crus.
+    Passa pelo desafio Cloudflare que bloqueava as requisições diretas.
     """
     payload = build_payload(query, stores, page, page_size, min_price, max_price)
+    raw = _run_stream_via_browser(payload, timeout=timeout)
 
-    if _HAS_CFFI:
-        # Tenta várias assinaturas TLS (JA3) diferentes — se uma passar pelo
-        # Cloudflare, usa. Cada navegador tem um handshake distinto.
-        last_exc = None
-        resp = None
-        for imp in _IMPERSONATE_ROTATION:
-            try:
-                resp = _cffi_requests.post(
-                    SEARCH_URL,
-                    params={"stream": "1"},
-                    json=payload,
-                    headers=DEFAULT_HEADERS,
-                    stream=True,
-                    timeout=timeout,
-                    impersonate=imp,
-                    proxies=_PROXIES,
-                )
-                if resp.status_code == 403:
-                    # Bloqueado com essa assinatura — tenta a próxima
-                    last_exc = RuntimeError(f"403 com impersonate={imp}")
-                    continue
-                break
-            except Exception as e:
-                last_exc = e
-                continue
-        if resp is None or resp.status_code == 403:
-            raise last_exc or RuntimeError("Todas as impersonações falharam (403)")
-    else:
-        sess = session or requests.Session()
-        resp = sess.post(
-            SEARCH_URL,
-            params={"stream": "1"},
-            json=payload,
-            headers=DEFAULT_HEADERS,
-            stream=True,
-            timeout=timeout,
-            proxies=_PROXIES,
-        )
-    resp.raise_for_status()
+    if raw.startswith("HTTP_ERROR_"):
+        raise RuntimeError(f"ZenMarket respondeu {raw} (via browser).")
+    if not raw.strip():
+        raise RuntimeError("Stream vazio via browser (possível bloqueio Cloudflare).")
 
-    ctype = resp.headers.get("Content-Type", "")
-    if "text/event-stream" not in ctype:
-        # Cloudflare provavelmente devolveu HTML de challenge
-        raise RuntimeError(
-            f"Resposta não é SSE (Content-Type={ctype!r}). "
-            "Possível bloqueio Cloudflare — tente curl_cffi ou cookies de sessão."
-        )
-
-    yield from iter_sse_events(resp)
-
+    # Faz o parse do texto SSE completo (mesma lógica de antes, em cima de string).
+    event_name = None
+    data_lines: list[str] = []
+    for line in raw.split("\n"):
+        line = line.rstrip("\r")
+        if line.startswith("event:"):
+            event_name = line[len("event:"):].strip()
+        elif line.startswith("data:"):
+            data_lines.append(line[len("data:"):].strip())
+        elif line == "":
+            if event_name and data_lines:
+                payload_obj = _parse_data_lines(data_lines)
+                if payload_obj is not None:
+                    yield event_name, payload_obj
+            event_name, data_lines = None, []
+    if event_name and data_lines:
+        payload_obj = _parse_data_lines(data_lines)
+        if payload_obj is not None:
+            yield event_name, payload_obj
 
 def _normalize_product(store_name: str, p: dict) -> dict:
     """Extrai e padroniza os campos úteis de um produto."""
