@@ -38,6 +38,16 @@ except Exception:
 # têm handshakes diferentes; alguma pode passar onde outra é bloqueada.
 _IMPERSONATE_ROTATION = ["chrome131", "chrome124", "safari17_0", "edge101", "chrome120"]
 
+# ── PROXY (opcional) ──────────────────────────────────────────────────────
+# Lê a URL do proxy da variável de ambiente PROXY_URL, no formato:
+#   http://usuario:senha@host:porta
+# Configurada no Railway (nunca no código). Se vazia, roda sem proxy.
+import os as _os
+_PROXY_URL = _os.getenv("PROXY_URL", "").strip()
+_PROXIES = {"http": _PROXY_URL, "https": _PROXY_URL} if _PROXY_URL else None
+if _PROXY_URL:
+    log.info("Proxy configurado (via PROXY_URL).")
+
 log = logging.getLogger("zenmarket_stream")
 
 # ---------------------------------------------------------------------------
@@ -230,6 +240,7 @@ def stream_search(
                     stream=True,
                     timeout=timeout,
                     impersonate=imp,
+                    proxies=_PROXIES,
                 )
                 if resp.status_code == 403:
                     # Bloqueado com essa assinatura — tenta a próxima
@@ -250,6 +261,7 @@ def stream_search(
             headers=DEFAULT_HEADERS,
             stream=True,
             timeout=timeout,
+            proxies=_PROXIES,
         )
     resp.raise_for_status()
 
