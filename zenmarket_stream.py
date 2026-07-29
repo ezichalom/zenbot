@@ -45,10 +45,10 @@ _IMPERSONATE_ROTATION = ["chrome131", "chrome124", "safari17_0", "edge101", "chr
 import os as _os
 _PROXY_URL = _os.getenv("PROXY_URL", "").strip()
 _PROXIES = {"http": _PROXY_URL, "https": _PROXY_URL} if _PROXY_URL else None
-if _PROXY_URL:
-    log.info("Proxy configurado (via PROXY_URL).")
 
 log = logging.getLogger("zenmarket_stream")
+if _PROXY_URL:
+    log.info("Proxy configurado (via PROXY_URL).")
 
 # ---------------------------------------------------------------------------
 # Constantes descobertas na engenharia reversa (03/07/2026)
