@@ -34,6 +34,10 @@ try:
 except Exception:
     _HAS_CFFI = False
 
+# Assinaturas TLS a tentar, em ordem. Versões recentes de Chrome/Safari/Edge
+# têm handshakes diferentes; alguma pode passar onde outra é bloqueada.
+_IMPERSONATE_ROTATION = ["chrome131", "chrome124", "safari17_0", "edge101", "chrome120"]
+
 log = logging.getLogger("zenmarket_stream")
 
 # ---------------------------------------------------------------------------
@@ -63,13 +67,22 @@ STATUS_FINISHED_EMPTY = "FINISHED_EMPTY"  # loja sem resultados
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     ),
     "Accept": "text/event-stream",
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8,ja;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
     "Content-Type": "application/json",
     "Origin": "https://zenmarket.jp",
     "Referer": "https://zenmarket.jp/pt/search.aspx",
     "X-Requested-With": "XMLHttpRequest",
+    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "Connection": "keep-alive",
 }
 
 
@@ -203,16 +216,31 @@ def stream_search(
     payload = build_payload(query, stores, page, page_size, min_price, max_price)
 
     if _HAS_CFFI:
-        # impersonate="chrome" replica o handshake TLS do Chrome → passa no Cloudflare
-        resp = _cffi_requests.post(
-            SEARCH_URL,
-            params={"stream": "1"},
-            json=payload,
-            headers=DEFAULT_HEADERS,
-            stream=True,
-            timeout=timeout,
-            impersonate="chrome",
-        )
+        # Tenta várias assinaturas TLS (JA3) diferentes — se uma passar pelo
+        # Cloudflare, usa. Cada navegador tem um handshake distinto.
+        last_exc = None
+        resp = None
+        for imp in _IMPERSONATE_ROTATION:
+            try:
+                resp = _cffi_requests.post(
+                    SEARCH_URL,
+                    params={"stream": "1"},
+                    json=payload,
+                    headers=DEFAULT_HEADERS,
+                    stream=True,
+                    timeout=timeout,
+                    impersonate=imp,
+                )
+                if resp.status_code == 403:
+                    # Bloqueado com essa assinatura — tenta a próxima
+                    last_exc = RuntimeError(f"403 com impersonate={imp}")
+                    continue
+                break
+            except Exception as e:
+                last_exc = e
+                continue
+        if resp is None or resp.status_code == 403:
+            raise last_exc or RuntimeError("Todas as impersonações falharam (403)")
     else:
         sess = session or requests.Session()
         resp = sess.post(
