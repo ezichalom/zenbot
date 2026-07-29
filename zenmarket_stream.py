@@ -255,10 +255,21 @@ def _proxy_dict():
 
 
 async def _fetch_stream_async(payload: dict, timeout: int = 90) -> str:
-    """Abre Chromium (async), passa pelo Cloudflare e captura o SSE via fetch()."""
+    """
+    Estratégia de INTERCEPTAÇÃO: em vez de disparar um fetch() (que o Cloudflare
+    detecta como requisição programática e bloqueia com 403), a gente faz o
+    navegador NAVEGAR de verdade até a URL da busca e captura a resposta do
+    endpoint stream=1 pelo response handler do Playwright.
+
+    A página de busca do ZenMarket, ao carregar com ?q=..., dispara ela mesma a
+    chamada para search.aspx?stream=1 — que sai como requisição legítima do site
+    (com todos os headers/cookies certos), passando pelo Cloudflare.
+    """
     from playwright.async_api import async_playwright
 
-    body_json = json.dumps(payload)
+    query = payload.get("query", "")
+    captured = {"body": ""}
+
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
@@ -272,47 +283,65 @@ async def _fetch_stream_async(payload: dict, timeout: int = 90) -> str:
             viewport={"width": 1366, "height": 768},
         )
         page = await context.new_page()
+
+        # Handler: quando QUALQUER resposta de search.aspx?stream=1 chegar,
+        # captura o corpo (é o SSE com os produtos).
+        async def _on_response(response):
+            try:
+                if "search.aspx" in response.url and "stream=1" in response.url:
+                    if response.status == 200:
+                        captured["body"] = await response.text()
+            except Exception:
+                pass
+
+        page.on("response", _on_response)
+
         try:
-            # Carrega a home primeiro (mais leve) — deixa o Cloudflare resolver.
-            await page.goto("https://zenmarket.jp/pt/",
-                            wait_until="domcontentloaded", timeout=timeout * 1000)
+            # Navega direto pra busca com a query na URL. A página resolve o
+            # Cloudflare e dispara sozinha a chamada stream=1 (que interceptamos).
+            search_url = (
+                "https://zenmarket.jp/pt/search.aspx?q="
+                + query.replace(" ", "+")
+            )
+            await page.goto(search_url, wait_until="domcontentloaded",
+                            timeout=timeout * 1000)
 
-            # Espera o desafio do Cloudflare terminar de verdade: título deixa de
-            # ser "Just a moment" E o cookie cf_clearance aparece no contexto.
-            async def _cf_liberado():
+            # Espera o Cloudflare liberar (cookie cf_clearance).
+            for _ in range(40):
                 title = (await page.title() or "").lower()
-                if "just a moment" in title or "attention" in title:
-                    return False
-                cookies = await context.cookies()
-                return any(c["name"] == "cf_clearance" for c in cookies)
+                if "just a moment" not in title and "attention" not in title:
+                    cookies = await context.cookies()
+                    if any(c["name"] == "cf_clearance" for c in cookies):
+                        break
+                await page.wait_for_timeout(1000)
 
-            liberado = False
-            for _ in range(40):                 # até 40s esperando o Cloudflare
-                if await _cf_liberado():
-                    liberado = True
+            # Depois de liberado, espera a página disparar e completar o stream.
+            # Damos tempo para o response handler capturar o corpo.
+            for _ in range(30):
+                if captured["body"]:
                     break
                 await page.wait_for_timeout(1000)
 
-            # Folga extra pra garantir que o cookie propagou antes do fetch.
-            await page.wait_for_timeout(1500)
+            # Se a página não disparou sozinha, força uma navegação à URL da API
+            # como NAVEGAÇÃO real (não fetch) — sai com cookie válido.
+            if not captured["body"]:
+                try:
+                    resp = await page.goto(
+                        "https://zenmarket.jp/pt/search.aspx?stream=1&q="
+                        + query.replace(" ", "+"),
+                        wait_until="domcontentloaded", timeout=timeout * 1000,
+                    )
+                    if resp and resp.status == 200:
+                        captured["body"] = await resp.text()
+                    elif resp:
+                        return f"HTTP_ERROR_{resp.status}"
+                except Exception:
+                    pass
 
-            # Navega para a página de busca já autenticado (mesma origem/cookie).
-            await page.goto("https://zenmarket.jp/pt/search.aspx",
-                            wait_until="domcontentloaded", timeout=timeout * 1000)
-            await page.wait_for_timeout(500)
-
-            # Dispara o fetch() da API SSE. Se vier 403, espera e tenta de novo
-            # (o cookie pode levar mais um instante para valer no endpoint).
-            for tentativa in range(3):
-                result = await page.evaluate(_JS_FETCH, body_json)
-                if result and not result.startswith("HTTP_ERROR_403"):
-                    return result
-                await page.wait_for_timeout(2500)
-            return result or ""
+            return captured["body"] or ""
         finally:
             await context.close()
             await browser.close()
-
 
 def _run_stream_via_browser(payload: dict, timeout: int = 90) -> str:
     """
