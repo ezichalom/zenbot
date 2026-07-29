@@ -254,6 +254,24 @@ def _proxy_dict():
     return d
 
 
+
+# Script injetado ANTES de qualquer página carregar: apaga os rastros de
+# automação que o Cloudflare fareja (navigator.webdriver, chrome headless, etc.).
+_STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR', 'pt', 'en']});
+Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
+window.chrome = { runtime: {} };
+const originalQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (parameters) => (
+    parameters.name === 'notifications'
+        ? Promise.resolve({state: Notification.permission})
+        : originalQuery(parameters)
+);
+Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+"""
+
 async def _fetch_stream_async(payload: dict, timeout: int = 90) -> str:
     """
     Estratégia de INTERCEPTAÇÃO: em vez de disparar um fetch() (que o Cloudflare
@@ -275,13 +293,23 @@ async def _fetch_stream_async(payload: dict, timeout: int = 90) -> str:
             headless=True,
             proxy=_proxy_dict(),
             args=["--no-sandbox", "--disable-blink-features=AutomationControlled",
-                  "--disable-dev-shm-usage"],
+                  "--disable-dev-shm-usage", "--disable-infobars",
+                  "--window-size=1366,768", "--start-maximized",
+                  "--disable-features=IsolateOrigins,site-per-process"],
         )
         context = await browser.new_context(
             locale="pt-BR",
-            user_agent=DEFAULT_HEADERS["User-Agent"],
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
             viewport={"width": 1366, "height": 768},
+            extra_http_headers={
+                "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8,ja;q=0.7",
+            },
         )
+        # STEALTH: injeta o mascaramento antes de qualquer script da página rodar.
+        await context.add_init_script(_STEALTH_JS)
         page = await context.new_page()
 
         # Handler: quando QUALQUER resposta de search.aspx?stream=1 chegar,
