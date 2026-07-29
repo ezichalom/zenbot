@@ -273,16 +273,41 @@ async def _fetch_stream_async(payload: dict, timeout: int = 90) -> str:
         )
         page = await context.new_page()
         try:
-            # Carrega a página — deixa o Cloudflare resolver o desafio de JS.
-            await page.goto("https://zenmarket.jp/pt/search.aspx",
+            # Carrega a home primeiro (mais leve) — deixa o Cloudflare resolver.
+            await page.goto("https://zenmarket.jp/pt/",
                             wait_until="domcontentloaded", timeout=timeout * 1000)
-            for _ in range(30):
+
+            # Espera o desafio do Cloudflare terminar de verdade: título deixa de
+            # ser "Just a moment" E o cookie cf_clearance aparece no contexto.
+            async def _cf_liberado():
                 title = (await page.title() or "").lower()
-                if "just a moment" not in title and "attention" not in title:
+                if "just a moment" in title or "attention" in title:
+                    return False
+                cookies = await context.cookies()
+                return any(c["name"] == "cf_clearance" for c in cookies)
+
+            liberado = False
+            for _ in range(40):                 # até 40s esperando o Cloudflare
+                if await _cf_liberado():
+                    liberado = True
                     break
                 await page.wait_for_timeout(1000)
-            # Dispara o fetch() da API SSE de dentro da página já liberada.
-            result = await page.evaluate(_JS_FETCH, body_json)
+
+            # Folga extra pra garantir que o cookie propagou antes do fetch.
+            await page.wait_for_timeout(1500)
+
+            # Navega para a página de busca já autenticado (mesma origem/cookie).
+            await page.goto("https://zenmarket.jp/pt/search.aspx",
+                            wait_until="domcontentloaded", timeout=timeout * 1000)
+            await page.wait_for_timeout(500)
+
+            # Dispara o fetch() da API SSE. Se vier 403, espera e tenta de novo
+            # (o cookie pode levar mais um instante para valer no endpoint).
+            for tentativa in range(3):
+                result = await page.evaluate(_JS_FETCH, body_json)
+                if result and not result.startswith("HTTP_ERROR_403"):
+                    return result
+                await page.wait_for_timeout(2500)
             return result or ""
         finally:
             await context.close()
