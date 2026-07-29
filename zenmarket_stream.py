@@ -13,17 +13,8 @@ Uso rápido:
 
 Dependências:
     pip install requests
-    # Se o Cloudflare bloquear no Railway (403/503), troque para:
-    # pip install curl_cffi   e use   from curl_cffi # Preferimos curl_cffi: imita a impressão digital TLS/JA3 de um navegador
-# real, o que costuma passar pelo Cloudflare (que bloqueia o requests puro
-# com 403). Se a lib não estiver instalada, cai para requests normal.
-try:
-    from curl_cffi import requests as _cffi_requests
-    _HAS_CFFI = True
-except Exception:
-    _HAS_CFFI = False
-
-import requests
+    # Se o Cloudflare bloquear no Railway (403/503), instale curl_cffi
+    # (já incluído no requirements) — este módulo usa automaticamente.
 """
 
 from __future__ import annotations
@@ -34,6 +25,14 @@ from datetime import datetime, timezone
 from typing import Iterator, Optional
 
 import requests
+
+# curl_cffi imita a impressão digital TLS/JA3 do Chrome, o que costuma passar
+# pelo Cloudflare (que bloqueia o requests puro com 403). Fallback: requests.
+try:
+    from curl_cffi import requests as _cffi_requests
+    _HAS_CFFI = True
+except Exception:
+    _HAS_CFFI = False
 
 log = logging.getLogger("zenmarket_stream")
 
