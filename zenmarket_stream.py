@@ -159,21 +159,50 @@ _PROXY_URL     = _os.getenv("PROXY_URL", "").strip()   # sticky! porta 10000+
 _CF_CACHE = {"cookie": None, "user_agent": None, "ts": 0.0}
 _CF_TTL = 20 * 60   # 20 minutos
 
+# User-Agent FIXO: o mesmo é enviado ao CapSolver (pra ele resolver com ele) e
+# usado no curl_cffi. Se o UA do solve != UA do uso, o Cloudflare rejeita.
+_FIXED_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
-def _proxy_for_capsolver() -> str:
-    """CapSolver quer o proxy como 'host:porta:usuario:senha'."""
+# Session ID estável: força o DataImpulse a devolver SEMPRE o mesmo IP (sticky
+# de verdade), garantindo que o IP do solve == IP do uso.
+_SESSID = "zenbot1"
+
+
+def _user_with_session(user: str) -> str:
+    """Acrescenta o session id ao username (trava o mesmo IP no DataImpulse)."""
+    if ";sessid." in user:
+        return user
+    return f"{user};sessid.{_SESSID}"
+
+
+def _proxy_parts():
+    """Extrai (user, pw, host, port) da PROXY_URL."""
     import re
     m = re.match(r"https?://(?:([^:@]+):([^@]+)@)?([^:/]+):(\d+)", _PROXY_URL)
     if not m:
+        return None
+    return m.group(1), m.group(2), m.group(3), m.group(4)
+
+
+def _proxy_for_capsolver() -> str:
+    """CapSolver quer 'host:porta:usuario:senha' — com sessid pra travar o IP."""
+    parts = _proxy_parts()
+    if not parts:
         return ""
-    user, pw, host, port = m.group(1), m.group(2), m.group(3), m.group(4)
+    user, pw, host, port = parts
+    user = _user_with_session(user)
     return f"{host}:{port}:{user}:{pw}" if user else f"{host}:{port}"
 
 
 def _proxy_for_cffi() -> Optional[dict]:
-    if not _PROXY_URL:
+    parts = _proxy_parts()
+    if not parts:
         return None
-    return {"http": _PROXY_URL, "https": _PROXY_URL}
+    user, pw, host, port = parts
+    user = _user_with_session(user)
+    url = f"http://{user}:{pw}@{host}:{port}"
+    return {"http": url, "https": url}
 
 
 def _solve_cloudflare() -> tuple[Optional[str], Optional[str]]:
@@ -194,6 +223,7 @@ def _solve_cloudflare() -> tuple[Optional[str], Optional[str]]:
             "type": "AntiCloudflareTask",
             "websiteURL": "https://zenmarket.jp/pt/",
             "proxy": proxy,
+            "userAgent": _FIXED_UA,
         },
     }, timeout=30).json()
 
@@ -242,8 +272,7 @@ def stream_search(
     for tentativa in (1, 2):
         cookie, ua = _solve_cloudflare()
         headers = dict(DEFAULT_HEADERS)
-        if ua:
-            headers["User-Agent"] = ua
+        headers["User-Agent"] = _FIXED_UA   # mesmo UA do solve
         cookies = {"cf_clearance": cookie} if cookie else {}
 
         resp = _cffi.post(
