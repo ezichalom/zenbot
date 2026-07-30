@@ -170,10 +170,9 @@ _SESSID = "zenbot1"
 
 
 def _user_with_session(user: str) -> str:
-    """Acrescenta o session id ao username (trava o mesmo IP no DataImpulse)."""
-    if ";sessid." in user:
-        return user
-    return f"{user};sessid.{_SESSID}"
+    """Sessid desativado: o formato ;sessid. causava timeout no CapSolver.
+    Mantemos o username puro (o __cr.jp já fixa o país)."""
+    return user
 
 
 def _proxy_parts():
