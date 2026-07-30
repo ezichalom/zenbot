@@ -1,3 +1,4 @@
+# Build normal do Railway (Nixpacks) — sem Docker/Playwright.
+# O bot voltou a ser leve: CapSolver resolve o Cloudflare via API.
 [build]
-builder = "dockerfile"
-dockerfilePath = "Dockerfile"
+builder = "nixpacks"

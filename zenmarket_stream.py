@@ -1,58 +1,35 @@
 """
 zenmarket_stream.py — Cliente da API interna de busca do ZenMarket (SSE)
 =========================================================================
-Engenharia reversa: POST https://zenmarket.jp/pt/search.aspx?stream=1
-Resposta: Server-Sent Events, um evento `store-result` por loja,
-finalizado por `search-complete` com {"totalFound": N}.
+Motor: CapSolver resolve o desafio Cloudflare (usando proxy sticky) e devolve
+o cookie cf_clearance; curl_cffi então chama a API SSE com esse cookie + o
+mesmo proxy + TLS de navegador. O cookie é cacheado ~20 min para economizar.
 
-Uso rápido:
-    from zenmarket_stream import search, STORE
-    produtos = search("bvlgari al38", stores=[STORE["Mercari"], STORE["YahooAuction"]])
-    for p in produtos:
-        print(p["storeName"], p["price"], p["title"][:60], p["url"])
-
-Dependências:
-    pip install requests
-    # Se o Cloudflare bloquear no Railway (403/503), instale curl_cffi
-    # (já incluído no requirements) — este módulo usa automaticamente.
+Variáveis de ambiente necessárias (no Railway):
+    CAPSOLVER_KEY  — chave da API do CapSolver
+    PROXY_URL      — proxy STICKY (porta 10000+): http://user:pass@host:porta
 """
 
 from __future__ import annotations
 
+import os as _os
 import json
+import time as _time
 import logging
 from datetime import datetime, timezone
 from typing import Iterator, Optional
 
 import requests
 
-# curl_cffi imita a impressão digital TLS/JA3 do Chrome, o que costuma passar
-# pelo Cloudflare (que bloqueia o requests puro com 403). Fallback: requests.
+log = logging.getLogger("zenmarket_stream")
+
+# curl_cffi (TLS de navegador) — necessário para o cf_clearance ser aceito.
 try:
-    from curl_cffi import requests as _cffi_requests
+    from curl_cffi import requests as _cffi
     _HAS_CFFI = True
 except Exception:
     _HAS_CFFI = False
 
-# Assinaturas TLS a tentar, em ordem. Versões recentes de Chrome/Safari/Edge
-# têm handshakes diferentes; alguma pode passar onde outra é bloqueada.
-_IMPERSONATE_ROTATION = ["chrome131", "chrome124", "safari17_0", "edge101", "chrome120"]
-
-# ── PROXY (opcional) ──────────────────────────────────────────────────────
-# Lê a URL do proxy da variável de ambiente PROXY_URL, no formato:
-#   http://usuario:senha@host:porta
-# Configurada no Railway (nunca no código). Se vazia, roda sem proxy.
-import os as _os
-_PROXY_URL = _os.getenv("PROXY_URL", "").strip()
-_PROXIES = {"http": _PROXY_URL, "https": _PROXY_URL} if _PROXY_URL else None
-
-log = logging.getLogger("zenmarket_stream")
-if _PROXY_URL:
-    log.info("Proxy configurado (via PROXY_URL).")
-
-# ---------------------------------------------------------------------------
-# Constantes descobertas na engenharia reversa (03/07/2026)
-# ---------------------------------------------------------------------------
 SEARCH_URL = "https://zenmarket.jp/pt/search.aspx"
 
 STORE = {
@@ -173,214 +150,77 @@ def _iter_utf8_lines(response: requests.Response) -> Iterator[str]:
         yield buf.decode("utf-8", errors="replace").rstrip("\r")
 
 
-def iter_sse_events(response: requests.Response) -> Iterator[tuple[str, dict]]:
-    """
-    Faz o parse manual do fluxo SSE.
-    Yields (event_name, data_dict) para cada bloco `event:` + `data:`.
-    """
-    event_name = None
-    data_lines: list[str] = []
+# ═══════════════════════════════════════════════════════════════════════════
+# MOTOR: CapSolver (resolve Cloudflare) + curl_cffi (usa o cookie) + cache
+# ═══════════════════════════════════════════════════════════════════════════
+_CAPSOLVER_KEY = _os.getenv("CAPSOLVER_KEY", "").strip()
+_PROXY_URL     = _os.getenv("PROXY_URL", "").strip()   # sticky! porta 10000+
 
-    for line in _iter_utf8_lines(response):
-
-        if line.startswith("event:"):
-            event_name = line[len("event:"):].strip()
-        elif line.startswith("data:"):
-            data_lines.append(line[len("data:"):].strip())
-        elif line == "":
-            # linha em branco = fim do bloco SSE
-            if event_name and data_lines:
-                payload = _parse_data_lines(data_lines)
-                if payload is not None:
-                    yield event_name, payload
-                else:
-                    preview = ("".join(data_lines))[:150]
-                    log.warning(
-                        "Bloco SSE com JSON inválido, ignorado. "
-                        "event=%r linhas=%d inicio=%r",
-                        event_name, len(data_lines), preview,
-                    )
-            event_name, data_lines = None, []
-
-    # flush final (caso o stream termine sem linha em branco)
-    if event_name and data_lines:
-        payload = _parse_data_lines(data_lines)
-        if payload is not None:
-            yield event_name, payload
+_CF_CACHE = {"cookie": None, "user_agent": None, "ts": 0.0}
+_CF_TTL = 20 * 60   # 20 minutos
 
 
-# ── Playwright ASSÍNCRONO ──────────────────────────────────────────────────
-# main.py chama search() via asyncio.to_thread, então rodamos o Playwright async
-# dentro de um event loop PRÓPRIO e isolado nessa thread. Isso evita os conflitos
-# "Sync API inside asyncio loop" e "Cannot switch to a different thread".
-import asyncio as _asyncio
-
-_JS_FETCH = """
-async (payloadStr) => {
-    const resp = await fetch("/pt/search.aspx?stream=1", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-            "X-Requested-With": "XMLHttpRequest"
-        },
-        body: payloadStr
-    });
-    if (!resp.ok) return "HTTP_ERROR_" + resp.status;
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let out = "";
-    while (true) {
-        const {done, value} = await reader.read();
-        if (done) break;
-        out += decoder.decode(value, {stream: true});
-    }
-    return out;
-}
-"""
-
-
-def _proxy_dict():
-    if not _PROXY_URL:
-        return None
+def _proxy_for_capsolver() -> str:
+    """CapSolver quer o proxy como 'host:porta:usuario:senha'."""
     import re
     m = re.match(r"https?://(?:([^:@]+):([^@]+)@)?([^:/]+):(\d+)", _PROXY_URL)
     if not m:
-        return None
+        return ""
     user, pw, host, port = m.group(1), m.group(2), m.group(3), m.group(4)
-    d = {"server": f"http://{host}:{port}"}
-    if user:
-        d["username"], d["password"] = user, pw
-    return d
+    return f"{host}:{port}:{user}:{pw}" if user else f"{host}:{port}"
 
 
+def _proxy_for_cffi() -> Optional[dict]:
+    if not _PROXY_URL:
+        return None
+    return {"http": _PROXY_URL, "https": _PROXY_URL}
 
-# Script injetado ANTES de qualquer página carregar: apaga os rastros de
-# automação que o Cloudflare fareja (navigator.webdriver, chrome headless, etc.).
-_STEALTH_JS = """
-Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR', 'pt', 'en']});
-Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
-window.chrome = { runtime: {} };
-const originalQuery = window.navigator.permissions.query;
-window.navigator.permissions.query = (parameters) => (
-    parameters.name === 'notifications'
-        ? Promise.resolve({state: Notification.permission})
-        : originalQuery(parameters)
-);
-Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
-Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
-"""
 
-async def _fetch_stream_async(payload: dict, timeout: int = 90) -> str:
-    """
-    Estratégia de INTERCEPTAÇÃO: em vez de disparar um fetch() (que o Cloudflare
-    detecta como requisição programática e bloqueia com 403), a gente faz o
-    navegador NAVEGAR de verdade até a URL da busca e captura a resposta do
-    endpoint stream=1 pelo response handler do Playwright.
+def _solve_cloudflare() -> tuple[Optional[str], Optional[str]]:
+    """Resolve o Cloudflare via CapSolver (com nosso proxy). Cacheia ~20min."""
+    now = _time.time()
+    if _CF_CACHE["cookie"] and (now - _CF_CACHE["ts"] < _CF_TTL):
+        return _CF_CACHE["cookie"], _CF_CACHE["user_agent"]
 
-    A página de busca do ZenMarket, ao carregar com ?q=..., dispara ela mesma a
-    chamada para search.aspx?stream=1 — que sai como requisição legítima do site
-    (com todos os headers/cookies certos), passando pelo Cloudflare.
-    """
-    from playwright.async_api import async_playwright
+    if not _CAPSOLVER_KEY:
+        raise RuntimeError("CAPSOLVER_KEY não configurada no Railway.")
+    proxy = _proxy_for_capsolver()
+    if not proxy:
+        raise RuntimeError("PROXY_URL inválida/ausente para o CapSolver.")
 
-    query = payload.get("query", "")
-    captured = {"body": ""}
+    create = requests.post("https://api.capsolver.com/createTask", json={
+        "clientKey": _CAPSOLVER_KEY,
+        "task": {
+            "type": "AntiCloudflareTask",
+            "websiteURL": "https://zenmarket.jp/pt/",
+            "proxy": proxy,
+        },
+    }, timeout=30).json()
 
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=True,
-            proxy=_proxy_dict(),
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled",
-                  "--disable-dev-shm-usage", "--disable-infobars",
-                  "--window-size=1366,768", "--start-maximized",
-                  "--disable-features=IsolateOrigins,site-per-process"],
-        )
-        context = await browser.new_context(
-            locale="pt-BR",
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1366, "height": 768},
-            extra_http_headers={
-                "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8,ja;q=0.7",
-            },
-        )
-        # STEALTH: injeta o mascaramento antes de qualquer script da página rodar.
-        await context.add_init_script(_STEALTH_JS)
-        page = await context.new_page()
+    task_id = create.get("taskId")
+    if not task_id:
+        raise RuntimeError(f"CapSolver createTask falhou: {create}")
 
-        # Handler: quando QUALQUER resposta de search.aspx?stream=1 chegar,
-        # captura o corpo (é o SSE com os produtos).
-        async def _on_response(response):
-            try:
-                if "search.aspx" in response.url and "stream=1" in response.url:
-                    if response.status == 200:
-                        captured["body"] = await response.text()
-            except Exception:
-                pass
+    for _ in range(40):
+        _time.sleep(2)
+        res = requests.post("https://api.capsolver.com/getTaskResult", json={
+            "clientKey": _CAPSOLVER_KEY, "taskId": task_id,
+        }, timeout=30).json()
+        status = res.get("status")
+        if status == "ready":
+            sol = res.get("solution", {})
+            cookie = (sol.get("cookies") or {}).get("cf_clearance") or sol.get("token")
+            ua = sol.get("userAgent")
+            _CF_CACHE.update({"cookie": cookie, "user_agent": ua, "ts": _time.time()})
+            log.info("CapSolver: Cloudflare resolvido (cache %dmin).", _CF_TTL // 60)
+            return cookie, ua
+        if status == "failed" or res.get("errorId"):
+            raise RuntimeError(f"CapSolver falhou: {res}")
+    raise RuntimeError("CapSolver: timeout aguardando solução.")
 
-        page.on("response", _on_response)
 
-        try:
-            # Navega direto pra busca com a query na URL. A página resolve o
-            # Cloudflare e dispara sozinha a chamada stream=1 (que interceptamos).
-            search_url = (
-                "https://zenmarket.jp/pt/search.aspx?q="
-                + query.replace(" ", "+")
-            )
-            await page.goto(search_url, wait_until="domcontentloaded",
-                            timeout=timeout * 1000)
-
-            # Espera o Cloudflare liberar (cookie cf_clearance).
-            for _ in range(40):
-                title = (await page.title() or "").lower()
-                if "just a moment" not in title and "attention" not in title:
-                    cookies = await context.cookies()
-                    if any(c["name"] == "cf_clearance" for c in cookies):
-                        break
-                await page.wait_for_timeout(1000)
-
-            # Depois de liberado, espera a página disparar e completar o stream.
-            # Damos tempo para o response handler capturar o corpo.
-            for _ in range(30):
-                if captured["body"]:
-                    break
-                await page.wait_for_timeout(1000)
-
-            # Se a página não disparou sozinha, força uma navegação à URL da API
-            # como NAVEGAÇÃO real (não fetch) — sai com cookie válido.
-            if not captured["body"]:
-                try:
-                    resp = await page.goto(
-                        "https://zenmarket.jp/pt/search.aspx?stream=1&q="
-                        + query.replace(" ", "+"),
-                        wait_until="domcontentloaded", timeout=timeout * 1000,
-                    )
-                    if resp and resp.status == 200:
-                        captured["body"] = await resp.text()
-                    elif resp:
-                        return f"HTTP_ERROR_{resp.status}"
-                except Exception:
-                    pass
-
-            return captured["body"] or ""
-        finally:
-            await context.close()
-            await browser.close()
-
-def _run_stream_via_browser(payload: dict, timeout: int = 90) -> str:
-    """
-    Ponte sync→async: cria um event loop próprio nesta thread e roda o
-    Playwright async dentro dele. Retorna o texto SSE completo.
-    """
-    loop = _asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(_fetch_stream_async(payload, timeout))
-    finally:
-        loop.close()
+def _invalidate_cf_cache():
+    _CF_CACHE.update({"cookie": None, "user_agent": None, "ts": 0.0})
 
 
 def stream_search(
@@ -391,16 +231,33 @@ def stream_search(
     min_price: Optional[int] = None,
     max_price: Optional[int] = None,
     session=None,
-    timeout: int = 90,
+    timeout: int = 60,
 ) -> Iterator[tuple[str, dict]]:
-    """Executa a busca via navegador (Playwright async) e produz eventos SSE."""
-    payload = build_payload(query, stores, page, page_size, min_price, max_price)
-    raw = _run_stream_via_browser(payload, timeout=timeout)
+    """Busca via API SSE, autenticada com cf_clearance (CapSolver) + curl_cffi."""
+    if not _HAS_CFFI:
+        raise RuntimeError("curl_cffi não instalado.")
 
-    if raw.startswith("HTTP_ERROR_"):
-        raise RuntimeError(f"ZenMarket respondeu {raw} (via browser).")
-    if not raw.strip():
-        raise RuntimeError("Stream vazio via browser (possível bloqueio Cloudflare).")
+    payload = build_payload(query, stores, page, page_size, min_price, max_price)
+    raw = ""
+    for tentativa in (1, 2):
+        cookie, ua = _solve_cloudflare()
+        headers = dict(DEFAULT_HEADERS)
+        if ua:
+            headers["User-Agent"] = ua
+        cookies = {"cf_clearance": cookie} if cookie else {}
+
+        resp = _cffi.post(
+            SEARCH_URL, params={"stream": "1"}, json=payload,
+            headers=headers, cookies=cookies, proxies=_proxy_for_cffi(),
+            impersonate="chrome", timeout=timeout,
+        )
+        if resp.status_code == 403 and tentativa == 1:
+            log.warning("403 com cookie em cache — resolvendo de novo.")
+            _invalidate_cf_cache()
+            continue
+        resp.raise_for_status()
+        raw = resp.text
+        break
 
     event_name = None
     data_lines: list[str] = []
@@ -420,6 +277,7 @@ def stream_search(
         obj = _parse_data_lines(data_lines)
         if obj is not None:
             yield event_name, obj
+
 
 def _normalize_product(store_name: str, p: dict) -> dict:
     """Extrai e padroniza os campos úteis de um produto."""
