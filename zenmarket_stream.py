@@ -170,9 +170,12 @@ _SESSID = "zenbot1"
 
 
 def _user_with_session(user: str) -> str:
-    """Sessid desativado: o formato ;sessid. causava timeout no CapSolver.
-    Mantemos o username puro (o __cr.jp já fixa o país)."""
-    return user
+    """Fixa o mesmo IP anexando ;sessid.<id> ao final do username, DEPOIS do
+    __cr.jp (formato oficial DataImpulse: LOGIN__cr.jp;sessid.xxxx).
+    Isso garante que CapSolver e curl_cffi saiam pelo MESMO IP."""
+    if ";sessid." in user:
+        return user
+    return f"{user};sessid.{_SESSID}"
 
 
 def _proxy_parts():
