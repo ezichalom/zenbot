@@ -521,12 +521,8 @@ async def search_loop():
 # (fora do funil normal: sem filtros de marca/teto; qualquer queda alerta)
 # ─────────────────────────────────────────────
 WATCHLIST = [
-    {
-        "label": "Tudor Hydronaut (Rakuma)",
-        "query": "tudor hydronaut",
-        "store": STORE["Rakuma"],
-        "sku":   "c490e86d913735b1c55b826278c95e75",
-    },
+    # (vazio) — Tudor Hydronaut removido a pedido do Ezi.
+    # Para vigiar um item, adicione: {"label","query","store","sku"}
 ]
 
 def get_watch_price(sku):
