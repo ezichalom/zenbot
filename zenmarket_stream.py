@@ -170,12 +170,9 @@ _SESSID = "zenbot1"
 
 
 def _user_with_session(user: str) -> str:
-    """Fixa o mesmo IP anexando ;sessid.<id> ao final do username, DEPOIS do
-    __cr.jp (formato oficial DataImpulse: LOGIN__cr.jp;sessid.xxxx).
-    Isso garante que CapSolver e curl_cffi saiam pelo MESMO IP."""
-    if ";sessid." in user:
-        return user
-    return f"{user};sessid.{_SESSID}"
+    """Sessid DESATIVADO: o CapSolver não aceita ;sessid. no username (timeout).
+    Username puro — o IP fixo virá do proxy estático (não do pool)."""
+    return user
 
 
 def _proxy_parts():
