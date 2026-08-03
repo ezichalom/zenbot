@@ -184,6 +184,22 @@ def _proxy_parts():
     return m.group(1), m.group(2), m.group(3), m.group(4)
 
 
+def _proxy_fields_for_capsolver() -> dict:
+    """Campos separados do proxy pro CapSolver (formato mais robusto que string).
+    Evita ambiguidade de parsing que causa ERROR_PROXY_CONNECT_REFUSED."""
+    parts = _proxy_parts()
+    if not parts:
+        return {}
+    user, pw, host, port = parts
+    return {
+        "proxyType": "http",
+        "proxyAddress": host,
+        "proxyPort": int(port),
+        "proxyLogin": user,
+        "proxyPassword": pw,
+    }
+
+
 def _proxy_for_capsolver() -> str:
     """CapSolver quer 'host:porta:usuario:senha' — com sessid pra travar o IP."""
     parts = _proxy_parts()
@@ -216,14 +232,15 @@ def _solve_cloudflare() -> tuple[Optional[str], Optional[str]]:
     if not proxy:
         raise RuntimeError("PROXY_URL inválida/ausente para o CapSolver.")
 
+    task = {
+        "type": "AntiCloudflareTask",
+        "websiteURL": "https://zenmarket.jp/pt/",
+        "userAgent": _FIXED_UA,
+    }
+    task.update(_proxy_fields_for_capsolver())   # proxyType/Address/Port/Login/Password
     create = requests.post("https://api.capsolver.com/createTask", json={
         "clientKey": _CAPSOLVER_KEY,
-        "task": {
-            "type": "AntiCloudflareTask",
-            "websiteURL": "https://zenmarket.jp/pt/",
-            "proxy": proxy,
-            "userAgent": _FIXED_UA,
-        },
+        "task": task,
     }, timeout=30).json()
 
     task_id = create.get("taskId")
