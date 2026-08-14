@@ -41,7 +41,13 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 # Intervalo entre ciclos completos de busca (segundos).
 # 300s = 5 min. Configurável via variável de ambiente no Railway.
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "600"))  # 10 min — economiza CPU no Railway
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "1200"))  # 20 min — reduz volume de alertas
+
+# Heartbeat: a cada HEARTBEAT_HOURS o bot manda um "sinal de vida" no Telegram
+# com um resumo (buscas OK, itens novos). Assim você sabe que está rodando —
+# e recebe um ALERTA imediato se começar a falhar de forma persistente.
+HEARTBEAT_HOURS = float(os.getenv("HEARTBEAT_HOURS", "6"))
+_hb_stats = {"ok": 0, "novos": 0, "erros": 0, "last": 0.0, "alerted_down": False}
 
 bot = Bot(token=TOKEN)
 
@@ -453,12 +459,32 @@ async def search_loop():
             try:
                 products = await asyncio.to_thread(fetch_keyword, k)
                 consecutive_errors = 0
+                _hb_stats["ok"] += 1
+                if _hb_stats["alerted_down"]:
+                    # Estava em falha e voltou — avisa recuperação.
+                    _hb_stats["alerted_down"] = False
+                    try:
+                        await bot.send_message(chat_id=CHAT_ID,
+                            text="✅ Bot recuperado — buscas voltaram a funcionar.")
+                    except Exception:
+                        pass
             except Exception as e:
                 consecutive_errors += 1
                 log.warning("Busca falhou para %r: %s", k, e)
                 # Backoff progressivo se o Cloudflare começar a bloquear
+                _hb_stats["erros"] += 1
                 if consecutive_errors >= 3:
                     log.error("3 falhas seguidas — pausando 15 min (possível bloqueio).")
+                    if not _hb_stats["alerted_down"]:
+                        _hb_stats["alerted_down"] = True
+                        try:
+                            await bot.send_message(chat_id=CHAT_ID,
+                                text=("⚠️ ATENÇÃO: 3 buscas falharam seguidas "
+                                      "(possível bloqueio Cloudflare). O bot vai "
+                                      "tentar o CapSolver automaticamente e pausar "
+                                      "15 min. Você será avisado se recuperar."))
+                        except Exception:
+                            pass
                     await asyncio.sleep(900)
                     consecutive_errors = 0
                 continue
@@ -508,9 +534,24 @@ async def search_loop():
                     )
 
                 await send_new_item(p, k)
+                _hb_stats["novos"] += 1
                 await asyncio.sleep(1)   # respiro entre mensagens Telegram
 
             await asyncio.sleep(5)       # respiro entre keywords
+
+        # Heartbeat periódico: sinal de vida + resumo.
+        import time as _t
+        agora = _t.time()
+        if agora - _hb_stats["last"] >= HEARTBEAT_HOURS * 3600:
+            _hb_stats["last"] = agora
+            try:
+                await bot.send_message(chat_id=CHAT_ID, text=(
+                    f"💓 Bot ativo. Últimas {HEARTBEAT_HOURS:.0f}h: "
+                    f"{_hb_stats['ok']} buscas OK, {_hb_stats['novos']} novos, "
+                    f"{_hb_stats['erros']} erros."))
+            except Exception:
+                pass
+            _hb_stats.update({"ok": 0, "novos": 0, "erros": 0})
 
         log.info("Ciclo completo. Próximo em %ss.", POLL_INTERVAL)
         await asyncio.sleep(POLL_INTERVAL)
