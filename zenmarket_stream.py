@@ -159,6 +159,11 @@ _PROXY_URL     = _os.getenv("PROXY_URL", "").strip()   # sticky! porta 10000+
 _CF_CACHE = {"cookie": None, "user_agent": None, "ts": 0.0}
 _CF_TTL = 20 * 60   # 20 minutos
 
+# Modo direto: tenta sem CapSolver/proxy primeiro (grátis e rápido).
+# Se o ZenMarket afrouxou o Cloudflare, isso já resolve. Se voltar o 403,
+# o código cai automaticamente pro CapSolver. Desligue com USE_DIRECT=0.
+_USE_DIRECT = _os.getenv("USE_DIRECT", "1").strip() != "0"
+
 # User-Agent FIXO: o mesmo é enviado ao CapSolver (pra ele resolver com ele) e
 # usado no curl_cffi. Se o UA do solve != UA do uso, o Cloudflare rejeita.
 _FIXED_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -285,12 +290,36 @@ def stream_search(
 
     payload = build_payload(query, stores, page, page_size, min_price, max_price)
     raw = ""
+
+    # ── TENTATIVA 1: DIRETO (sem CapSolver, sem proxy) ──
+    # Se o ZenMarket afrouxou o Cloudflare, isto já funciona — grátis e rápido.
+    if _USE_DIRECT:
+        try:
+            headers = dict(DEFAULT_HEADERS)
+            headers["User-Agent"] = _FIXED_UA
+            resp = _cffi.post(
+                SEARCH_URL, params={"stream": "1"}, json=payload,
+                headers=headers, impersonate="chrome", timeout=timeout,
+            )
+            if resp.status_code == 200:
+                raw = resp.text
+                if raw.strip():
+                    log.info("Busca direta OK (sem CapSolver).")
+                    yield from _parse_sse(raw)
+                    return
+            else:
+                log.info("Direto retornou %s — caindo pro CapSolver.", resp.status_code)
+        except Exception as e:
+            log.info("Direto falhou (%s) — caindo pro CapSolver.", e)
+
+    # ── TENTATIVA 2: CapSolver + proxy (fallback robusto) ──
+    if not _CAPSOLVER_KEY:
+        raise RuntimeError("Direto falhou e CAPSOLVER_KEY não configurada.")
     for tentativa in (1, 2):
         cookie, ua = _solve_cloudflare()
         headers = dict(DEFAULT_HEADERS)
-        headers["User-Agent"] = _FIXED_UA   # mesmo UA do solve
+        headers["User-Agent"] = _FIXED_UA
         cookies = {"cf_clearance": cookie} if cookie else {}
-
         resp = _cffi.post(
             SEARCH_URL, params={"stream": "1"}, json=payload,
             headers=headers, cookies=cookies, proxies=_proxy_for_cffi(),
@@ -304,6 +333,11 @@ def stream_search(
         raw = resp.text
         break
 
+    yield from _parse_sse(raw)
+
+
+def _parse_sse(raw: str):
+    """Parseia o texto SSE completo em eventos (event, dict)."""
     event_name = None
     data_lines: list[str] = []
     for line in raw.split("\n"):
