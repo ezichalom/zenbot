@@ -167,8 +167,8 @@ JPY_TO_BRL = 0.035
 # Tetos definidos em REAIS (R$) e convertidos para ienes automaticamente.
 # Para ajustar no futuro: mude só o valor em R$ aqui embaixo.
 BRAND_MAX_PRICE_BRL = {
-    "tag heuer":   3_950,
-    "タグホイヤー": 3_950,
+    # "tag heuer":   3_950,   # DESATIVADO
+    # "タグホイヤー": 3_950,   # DESATIVADO
     "bvlgari":     4_500,
     "ブルガリ":    4_500,
     "omega":       8_000,
@@ -180,9 +180,9 @@ BRAND_MAX_PRICE = {b: int(v / JPY_TO_BRL) for b, v in BRAND_MAX_PRICE_BRL.items(
 GOOD_DEAL_THRESHOLD = 0.20   # 20% abaixo da média histórica
 
 KEYWORDS = [
-    # Tag Heuer — só Formula 1
-    "タグホイヤー フォーミュラ1","tag heuer formula 1",
-    "tag heuer waz","tag heuer caz","waz1112","waz1110","caz1010",
+    # Tag Heuer — DESATIVADO a pedido do Ezi (remova os # para reativar)
+    # "タグホイヤー フォーミュラ1","tag heuer formula 1",
+    # "tag heuer waz","tag heuer caz","waz1112","waz1110","caz1010",
     # Bvlgari — sempre MARCA + referência (evita código de peça e porcaria)
     "bvlgari al38","bvlgari ac38","bvlgari sd38",
     "bvlgari diagono","bvlgari aluminium","ブルガリ アルミニウム",
@@ -241,7 +241,7 @@ def translate(t):
 # Referência no título já identifica a marca — assim o teto se aplica
 # mesmo quando o vendedor não escreve o nome da marca (ex.: "CAZ1010 クロノ").
 BRAND_PATTERNS = {
-    "tag heuer": ["タグホイヤー","waz","caz","formula","フォーミュラ"],
+    # "tag heuer": ["タグホイヤー","waz","caz","formula","フォーミュラ"],   # DESATIVADO
     "bvlgari":   ["ブルガリ","al38","ac38","sd38",
                   "aluminium","アルミニウム","diagono","ディアゴノ","dg"],
 }
@@ -301,9 +301,8 @@ def token_in(text, tokens):
     return False
 
 MUST_HAVE = [
-    # Tag Heuer — SOMENTE Formula 1 (WAZ/CAZ). "tag heuer" sozinho não basta,
-    # para cortar Carrera/Aquaracer/Professional(WG)/Connected.
-    "waz","caz","formula 1","formula1","フォーミュラ",
+    # Tag Heuer — DESATIVADO a pedido do Ezi (remova os # para reativar)
+    # "waz","caz","formula 1","formula1","フォーミュラ",
     # Bvlgari
     "bvlgari","ブルガリ","al38","ac38","sd38",
     "aluminium","アルミニウム","diagono","ディアゴノ",
