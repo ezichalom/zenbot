@@ -70,6 +70,27 @@ GS_BAD = [
     "空箱","箱のみ",  # só caixa vazia
 ]
 
+# ── Pulseiras / acessórios avulsos (NÃO são o relógio) ──
+# Bloqueiam quando o anúncio é claramente de acessório, não do relógio completo.
+GS_ACESSORIO = [
+    "バンドのみ","ベルトのみ","ブレスのみ","ストラップのみ",
+    "バンド単体","ベルト単体","ブレス単体",
+    "尾錠","dバックル","バックル","buckle","clasp","deployant",
+    "コマ","駒","中留","中留め",  # elos / fecho
+    "交換用","替えベルト","替えバンド","社外ベルト","社外バンド",
+    "strap only","band only","bracelet only","link","links",
+    "ケース保護","保護フィルム","フィルム","カバー",  # película/capa
+    "工具","ばね棒","バネ棒","spring bar","tool",  # ferramentas
+    "ボックス","box only","ウォッチワインダー","winder","収納",  # caixa/winder
+    "スタンド","stand","ホルダー","holder",  # suporte
+]
+
+# Sinais de que é o RELÓGIO COMPLETO (permite passar mesmo citando pulseira)
+GS_RELOGIO_COMPLETO = [
+    "腕時計","本体","稼働","動作","クオーツ","quartz","自動巻","オートマ",
+    "セイコー 腕時計","文字盤","ムーブメント",
+]
+
 # ── Sinais de "pode não funcionar" (sinalizar, não excluir) ──
 GS_NAO_FUNCIONA = ["不動","動作不良","要修理","為修理","ジャンク","junk","故障","不具合"]
 
@@ -117,6 +138,15 @@ def gs_evaluate(title, price_jpy, description=""):
 
     if not is_grand_seiko(t):
         return None
+
+    # Bloqueio de PULSEIRA/ACESSÓRIO avulso: se cita termo de acessório e
+    # NÃO tem sinal claro de relógio completo, descarta (é pulseira/caixa solta).
+    if any(a in t for a in GS_ACESSORIO):
+        tem_relogio = any(w in t for w in GS_RELOGIO_COMPLETO)
+        # Se tem referência SBG + sinal de relógio, pode ser relógio COM pulseira.
+        # Senão, é acessório avulso → descarta.
+        if not tem_relogio:
+            return None
 
     # Exclusões duras: feminino, falso, só-peças.
     if any(b in t for b in GS_BAD):
