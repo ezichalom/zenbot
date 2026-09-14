@@ -184,9 +184,9 @@ KEYWORDS = [
     # Tag Heuer — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "タグホイヤー フォーミュラ1","tag heuer formula 1",
     # "tag heuer waz","tag heuer caz","waz1112","waz1110","caz1010",
-    # Bvlgari — sempre MARCA + referência (evita código de peça e porcaria)
-    "bvlgari al38","bvlgari ac38","bvlgari sd38",
-    "bvlgari diagono","bvlgari aluminium","ブルガリ アルミニウム",
+    # Bvlgari — Aluminium (AL38/AC38) DESATIVADO a pedido do Ezi (bot próprio depois).
+    # "bvlgari al38","bvlgari ac38","bvlgari aluminium","ブルガリ アルミニウム",
+    "bvlgari sd38","bvlgari diagono",
     # Omega — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "omega","オメガ","speedmaster","3513",
 ]
@@ -246,8 +246,7 @@ def translate(t):
 # mesmo quando o vendedor não escreve o nome da marca (ex.: "CAZ1010 クロノ").
 BRAND_PATTERNS = {
     # "tag heuer": ["タグホイヤー","waz","caz","formula","フォーミュラ"],   # DESATIVADO
-    "bvlgari":   ["ブルガリ","al38","ac38","sd38",
-                  "aluminium","アルミニウム","diagono","ディアゴノ","dg"],
+    "bvlgari":   ["ブルガリ","sd38","diagono","ディアゴノ"],
 }
 
 def get_brand(title):
@@ -307,9 +306,8 @@ def token_in(text, tokens):
 MUST_HAVE = [
     # Tag Heuer — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "waz","caz","formula 1","formula1","フォーミュラ",
-    # Bvlgari
-    "bvlgari","ブルガリ","al38","ac38","sd38",
-    "aluminium","アルミニウム","diagono","ディアゴノ",
+    # Bvlgari — só Diagono/SD38 (Aluminium AL38/AC38 desativado)
+    "sd38","diagono","ディアゴノ",
 ]
 
 # Termos de PULSEIRA/acessório de pulso: só bloqueiam se o anúncio NÃO tiver
