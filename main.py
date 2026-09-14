@@ -29,6 +29,7 @@ from telegram import Bot
 from deep_translator import GoogleTranslator
 
 from zenmarket_stream import search as zen_search, STORE
+import grand_seiko as gs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("zenbot")
@@ -189,6 +190,9 @@ KEYWORDS = [
     # Omega — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "omega","オメガ","speedmaster","3513",
 ]
+
+# Keywords do Grand Seiko (categoria própria — ver grand_seiko.py)
+KEYWORDS += gs.GS_KEYWORDS
 
 BAD_WORDS = [
     "parts","部品","box","case","empty","箱のみ",
@@ -412,6 +416,63 @@ async def send_new_item(product, keyword):
 
     await bot.send_message(chat_id=CHAT_ID, text=caption)
 
+async def send_gs_item(product, gs_data):
+    """Alerta de Grand Seiko com classificação, referência e faixa de venda BR."""
+    price = product["price"]
+
+    # Emoji e etiqueta por classificação
+    etiqueta = {
+        "PRIORIDADE": "🔥 PRIORIDADE",
+        "ANALISAR":   "🔎 ANALISAR",
+        "JUNK":       "⚠️ JUNK (revisar)",
+    }.get(gs_data["classificacao"], gs_data["classificacao"])
+
+    tipo = "Leilão" if product.get("bids") is not None else "Preço fixo"
+
+    auction_info = ""
+    if product.get("bids") is not None:
+        auction_info = f"🔨 Lances: {product['bids']}"
+        if product.get("buyoutPrice"):
+            auction_info += f" | Compra já: ¥{product['buyoutPrice']:,}"
+        auction_info += "\n"
+    if product.get("auctionEndTime"):
+        auction_info += f"🕐 Fim: {product['auctionEndTime']:%d/%m %H:%M} (JST)\n"
+
+    ref_line = f"📌 Ref: {gs_data['ref']}" if gs_data["ref"] else "📌 Ref: (não no título)"
+    if gs_data["calibre"]:
+        ref_line += f" | Calibre: {gs_data['calibre']}"
+
+    venda_line = ""
+    if gs_data["sell_range"]:
+        venda_line = f"📈 Venda BR (ref.): {gs_data['sell_range']}\n"
+
+    alerta_func = ""
+    if gs_data["nao_funciona"]:
+        alerta_func = "🔧 Pode NÃO estar funcionando — verificar!\n"
+
+    link = build_link(product)
+    caption = (
+        f"⌚ GRAND SEIKO — {etiqueta}\n"
+        f"\n{ref_line}\n"
+        f"📝 {translate(product['title'])[:70]}\n"
+        f"💰 Compra: {convert(price)}\n"
+        f"{venda_line}"
+        f"🏷️ {tipo}\n"
+        f"{auction_info}"
+        f"{alerta_func}"
+        f"🔗 {link}\n"
+        f"\n━━━━━━━━━━\n"
+    )
+    image_url = product.get("image")
+    if image_url:
+        try:
+            await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+            return
+        except Exception as e:
+            log.warning("Falha ao enviar foto GS (%s); só texto.", e)
+    await bot.send_message(chat_id=CHAT_ID, text=caption)
+
+
 async def send_auction_ending(item_row, hours_left):
     id_, title, price, end_time, link, *_ = item_row
     emoji = "🚨" if hours_left <= 1 else "⏰"
@@ -441,11 +502,21 @@ def fetch_keyword(keyword):
     """
     brand = get_brand(keyword)
     max_p = BRAND_MAX_PRICE.get(brand) if brand else None
+
+    # Grand Seiko: sem piso na API (pega leilões que começam baratos) e teto
+    # geral de compra do GS. O gs_evaluate() faz a triagem fina depois.
+    is_gs_kw = keyword in gs.GS_KEYWORDS
+    if is_gs_kw:
+        min_p = None
+        max_p = int(gs.GS_MAX_COMPRA_BRL / gs.JPY_TO_BRL)   # ~R$10.000 em ¥
+    else:
+        min_p = 20_000
+
     return zen_search(
         keyword,
         stores=MONITORED_STORES,
         page_size=50,
-        min_price=20_000,
+        min_price=min_p,
         max_price=max_p,
     )
 
@@ -489,7 +560,12 @@ async def search_loop():
                 continue
 
             for p in products:
-                if not valid(p["title"], p["raw"].get("description", ""), p["price"]):
+                # Grand Seiko tem avaliação própria (categoria separada).
+                gs_data = gs.gs_evaluate(p["title"], p["price"],
+                                         p["raw"].get("description", ""))
+                is_gs = gs_data is not None
+                # Se NÃO é GS válido, aplica o filtro normal (Bvlgari etc.).
+                if not is_gs and not valid(p["title"], p["raw"].get("description", ""), p["price"]):
                     continue
 
                 uid    = f'{p["storeName"]}:{p["sku"]}'
@@ -532,7 +608,10 @@ async def search_loop():
                         build_link(p),
                     )
 
-                await send_new_item(p, k)
+                if is_gs:
+                    await send_gs_item(p, gs_data)
+                else:
+                    await send_new_item(p, k)
                 _hb_stats["novos"] += 1
                 await asyncio.sleep(1)   # respiro entre mensagens Telegram
 
