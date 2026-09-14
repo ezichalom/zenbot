@@ -315,6 +315,15 @@ MUST_HAVE = [
 # borracha) no título — não podemos barrar o relógio por causa disso.
 STRAP_WORDS = ["belt","strap","ベルト","band","バンド","尾錠","バックル","buckle"]
 
+# Acessório DEFINITIVO: bloqueia sempre, mesmo citando o modelo (Diagono etc.).
+# Pulseira/elo/fivela/meio-elo — nunca é o relógio completo.
+STRAP_HARD = [
+    "駒","コマ","半コマ","ブレス","ブレスレット","bracelet","メタルブレス",
+    "ベルト用","バンド用","交換用","替えベルト","替えバンド",
+    "尾錠","バックル","dバックル","buckle","clasp","中留","中留め",
+    "コンビ ブレス","strap only","band only","link","links",
+]
+
 # Sinal forte de relógio real (marca+ref ou a palavra "relógio" em japonês):
 WATCH_SIGNAL = ["al38","ac38","sd38","waz","caz","aluminium","アルミニウム",
                 "diagono","ディアゴノ","腕時計","自動巻","クォーツ","デイト"]
@@ -325,7 +334,11 @@ def valid(title, description, price):
 
     if any(b in t for b in BAD_WORDS):
         return False
-    # Pulseira/acessório: bloqueia só se NÃO houver sinal de relógio real.
+    # Acessório DEFINITIVO (elo/fivela/pulseira avulsa) — bloqueia sempre,
+    # mesmo que cite o modelo (ex.: "ディアゴノ ベルト 駒").
+    if any(h in t for h in STRAP_HARD):
+        return False
+    # Pulseira genérica: bloqueia só se NÃO houver sinal de relógio real.
     if any(sw in t for sw in STRAP_WORDS) and not any(ws in t for ws in WATCH_SIGNAL):
         return False
     if not token_in(t, MUST_HAVE):
