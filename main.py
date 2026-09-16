@@ -38,7 +38,10 @@ log = logging.getLogger("zenbot")
 # ENV
 # ─────────────────────────────────────────────
 TOKEN   = os.getenv("TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+CHAT_ID = os.getenv("CHAT_ID")                      # grupo — Grand Seiko
+# Bvlgari (Diagono + Aluminium) vão pra este chat (teu privado). Se não
+# definido, cai no CHAT_ID (grupo) pra não perder alerta.
+CHAT_ID_BVLGARI = os.getenv("CHAT_ID_BVLGARI") or CHAT_ID
 
 # Intervalo entre ciclos completos de busca (segundos).
 # 300s = 5 min. Configurável via variável de ambiente no Railway.
@@ -170,8 +173,8 @@ JPY_TO_BRL = 0.035
 BRAND_MAX_PRICE_BRL = {
     # "tag heuer":   3_950,   # DESATIVADO
     # "タグホイヤー": 3_950,   # DESATIVADO
-    "bvlgari":     4_500,
-    "ブルガリ":    4_500,
+    "bvlgari":     4_000,
+    "ブルガリ":    4_000,
     "omega":       8_000,
     "オメガ":      8_000,
     "speedmaster": 8_000,
@@ -184,9 +187,10 @@ KEYWORDS = [
     # Tag Heuer — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "タグホイヤー フォーミュラ1","tag heuer formula 1",
     # "tag heuer waz","tag heuer caz","waz1112","waz1110","caz1010",
-    # Bvlgari — Aluminium (AL38/AC38) DESATIVADO a pedido do Ezi (bot próprio depois).
-    # "bvlgari al38","bvlgari ac38","bvlgari aluminium","ブルガリ アルミニウム",
-    "bvlgari sd38","bvlgari diagono",
+    # Bvlgari — buscas AMPLAS (trazem todos os LCV/SD/CH/AL/BB nos resultados).
+    # As referências específicas filtram via MUST_HAVE. Vão pro privado.
+    "bvlgari diagono","bvlgari aluminium","bvlgari solotempo",
+    "ブルガリ ディアゴノ","ブルガリ アルミニウム","ブルガリ ソロテンポ",
     # Omega — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "omega","オメガ","speedmaster","3513",
 ]
@@ -246,7 +250,9 @@ def translate(t):
 # mesmo quando o vendedor não escreve o nome da marca (ex.: "CAZ1010 クロノ").
 BRAND_PATTERNS = {
     # "tag heuer": ["タグホイヤー","waz","caz","formula","フォーミュラ"],   # DESATIVADO
-    "bvlgari":   ["ブルガリ","sd38","diagono","ディアゴノ"],
+    "bvlgari":   ["ブルガリ","al38","al44","ac38","aluminium","アルミニウム",
+                  "lcv35","lcv38","sd38","sd40","ch35","ch40","bb33","bb38",
+                  "diagono","ディアゴノ","solotempo","ソロテンポ"],
 }
 
 def get_brand(title):
@@ -306,8 +312,16 @@ def token_in(text, tokens):
 MUST_HAVE = [
     # Tag Heuer — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "waz","caz","formula 1","formula1","フォーミュラ",
-    # Bvlgari — só Diagono/SD38 (Aluminium AL38/AC38 desativado)
-    "sd38","diagono","ディアゴノ",
+    # Bvlgari — referências monitoradas (filtram o que as buscas amplas trazem)
+    # Aluminium
+    "al38","al38g","al38ta","al44ta","al44a","ac38","aluminium","アルミニウム",
+    # Diagono (LCV / SD / CH)
+    "lcv35s","lcv35sg","lcv38s","lcv38sg","lcv35","lcv38",
+    "sd38","sd38s","sd38sg","sd40s","sd40sg","sd40",
+    "ch35s","ch35sg","ch40s","ch40sg","ch35","ch40",
+    "diagono","ディアゴノ",
+    # BB / Solotempo
+    "bb33ss","bb38ss","bb33","bb38","solotempo","ソロテンポ",
 ]
 
 # Termos de PULSEIRA/acessório de pulso: só bloqueiam se o anúncio NÃO tiver
@@ -420,12 +434,12 @@ async def send_new_item(product, keyword):
     image_url = product.get("image")
     if image_url:
         try:
-            await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+            await bot.send_photo(chat_id=CHAT_ID_BVLGARI, photo=image_url, caption=caption)
             return
         except Exception as e:
             log.warning("Falha ao enviar foto (%s); enviando só texto.", e)
 
-    await bot.send_message(chat_id=CHAT_ID, text=caption)
+    await bot.send_message(chat_id=CHAT_ID_BVLGARI, text=caption)
 
 async def send_gs_item(product, gs_data):
     """Alerta de Grand Seiko com classificação, referência e faixa de venda BR."""
