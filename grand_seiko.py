@@ -84,7 +84,10 @@ GS_ACESSORIO_HARD = [
     "保護フィルム","フィルム","カバー","保護",                 # película/capa
     "工具","ばね棒","バネ棒","spring bar","tool",              # ferramentas
     "ウォッチワインダー","winder","スタンド","stand","ホルダー","holder","収納",  # winder/suporte
-    "box only","箱のみ","空箱",                               # só caixa
+    "box only","箱のみ","空箱","ボックス","時計用ボックス","純正ボックス",  # caixa (katakana tb)
+    "メンテナンス","メンテナンスキット","キット","kit","クリーニング",  # kit manutenção/limpeza
+    "時計用","お手入れ","cloth","クロス","クリーナー","cleaner",  # para-relógio / limpeza
+    "説明書","保証書のみ","冊子","カタログ","catalog",  # manual/garantia/catálogo avulso
 ]
 
 # Mantida por compatibilidade (não mais usada com exceção — tudo é hard agora).
