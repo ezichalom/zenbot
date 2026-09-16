@@ -41,7 +41,16 @@ TOKEN   = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")                      # grupo — Grand Seiko
 # Bvlgari (Diagono + Aluminium) vão pra este chat (teu privado). Se não
 # definido, cai no CHAT_ID (grupo) pra não perder alerta.
-CHAT_ID_BVLGARI = os.getenv("CHAT_ID_BVLGARI") or CHAT_ID
+# AL38/AC38 (Aluminium clássico) vão pra este chat (privado). Todo o resto
+# (outros Bvlgari + Grand Seiko) vai pro CHAT_ID (grupo).
+CHAT_ID_PRIVADO = os.getenv("CHAT_ID_BVLGARI") or os.getenv("CHAT_ID_PRIVADO") or CHAT_ID
+
+def _destino_bvlgari(title):
+    """AL38 ou AC38 no título → privado. Qualquer outro Bvlgari → grupo."""
+    t = (title or "").lower()
+    if "al38" in t or "ac38" in t:
+        return CHAT_ID_PRIVADO
+    return CHAT_ID
 
 # Intervalo entre ciclos completos de busca (segundos).
 # 300s = 5 min. Configurável via variável de ambiente no Railway.
@@ -403,6 +412,7 @@ async def send_price_drop(product, old_price):
 
 
 async def send_new_item(product, keyword):
+    destino = _destino_bvlgari(product.get("title", ""))
     price = product["price"]
     # Cálculo mantido por baixo (histórico/uso futuro), mas NÃO exibido na mensagem.
     good_deal_flags(keyword, price)
@@ -434,12 +444,12 @@ async def send_new_item(product, keyword):
     image_url = product.get("image")
     if image_url:
         try:
-            await bot.send_photo(chat_id=CHAT_ID_BVLGARI, photo=image_url, caption=caption)
+            await bot.send_photo(chat_id=destino, photo=image_url, caption=caption)
             return
         except Exception as e:
             log.warning("Falha ao enviar foto (%s); enviando só texto.", e)
 
-    await bot.send_message(chat_id=CHAT_ID_BVLGARI, text=caption)
+    await bot.send_message(chat_id=destino, text=caption)
 
 async def send_gs_item(product, gs_data):
     """Alerta de Grand Seiko com classificação, referência e faixa de venda BR."""
