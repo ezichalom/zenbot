@@ -30,6 +30,7 @@ from deep_translator import GoogleTranslator
 
 from zenmarket_stream import search as zen_search, STORE
 import grand_seiko as gs
+import omega as om
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("zenbot")
@@ -198,14 +199,15 @@ KEYWORDS = [
     # "tag heuer waz","tag heuer caz","waz1112","waz1110","caz1010",
     # Bvlgari — buscas AMPLAS (trazem todos os LCV/SD/CH/AL/BB nos resultados).
     # As referências específicas filtram via MUST_HAVE. Vão pro privado.
-    "bvlgari diagono","bvlgari aluminium","bvlgari solotempo",
-    "ブルガリ ディアゴノ","ブルガリ アルミニウム","ブルガリ ソロテンポ",
+    "bvlgari diagono","bvlgari aluminium",
+    "ブルガリ ディアゴノ","ブルガリ アルミニウム",
     # Omega — DESATIVADO a pedido do Ezi (remova os # para reativar)
     # "omega","オメガ","speedmaster","3513",
 ]
 
 # Keywords do Grand Seiko (categoria própria — ver grand_seiko.py)
 KEYWORDS += gs.GS_KEYWORDS
+KEYWORDS += om.OMEGA_KEYWORDS
 
 BAD_WORDS = [
     "parts","部品","box","case","empty","箱のみ",
@@ -223,7 +225,7 @@ BAD_WORDS = [
     "conectado","connected","スマートウォッチ","smartwatch",
     "strass","ネックレス","necklace","指輪","ring","earring","ピアス","イヤリング",
     "bag","バッグ","財布","wallet","香水","perfume","キーホルダー",   # tamanhos Bvlgari que o Ezi não trabalha (feminino/boys)
-    "omega","オメガ","speedmaster",  # Omega 100% DESATIVADO — apague esta linha para reativar
+    # Omega REATIVADO como categoria própria (ver omega.py) — não bloquear.
 ]
 
 # Lojas monitoradas via API stream
@@ -261,7 +263,7 @@ BRAND_PATTERNS = {
     # "tag heuer": ["タグホイヤー","waz","caz","formula","フォーミュラ"],   # DESATIVADO
     "bvlgari":   ["ブルガリ","al38","al44","ac38","aluminium","アルミニウム",
                   "lcv35","lcv38","sd38","sd40","ch35","ch40","bb33","bb38",
-                  "diagono","ディアゴノ","solotempo","ソロテンポ"],
+                  "diagono","ディアゴノ"],
 }
 
 def get_brand(title):
@@ -330,7 +332,7 @@ MUST_HAVE = [
     "ch35s","ch35sg","ch40s","ch40sg","ch35","ch40",
     "diagono","ディアゴノ",
     # BB / Solotempo
-    "bb33ss","bb38ss","bb33","bb38","solotempo","ソロテンポ",
+    "bb33ss","bb38ss","bb33","bb38",
 ]
 
 # Termos de PULSEIRA/acessório de pulso: só bloqueiam se o anúncio NÃO tiver
@@ -451,6 +453,55 @@ async def send_new_item(product, keyword):
 
     await bot.send_message(chat_id=destino, text=caption)
 
+async def send_omega_item(product, om_data):
+    """Alerta de Omega com classificação, linha e referência. Vai pro grupo."""
+    price = product["price"]
+    etiqueta = {
+        "PRIORIDADE": "🔥 PRIORIDADE",
+        "ANALISAR":   "🔎 ANALISAR",
+        "JUNK":       "⚠️ JUNK/DEFEITO",
+    }.get(om_data["classificacao"], om_data["classificacao"])
+
+    tipo = "Leilão" if product.get("bids") is not None else "Preço fixo"
+    auction_info = ""
+    if product.get("bids") is not None:
+        auction_info = f"🔨 Lances: {product['bids']}"
+        if product.get("buyoutPrice"):
+            auction_info += f" | Compra já: ¥{product['buyoutPrice']:,}"
+        auction_info += "\n"
+    if product.get("auctionEndTime"):
+        auction_info += f"🕐 Fim: {product['auctionEndTime']:%d/%m %H:%M} (JST)\n"
+
+    linha_ref = f"📌 {om_data['linha'] or 'Omega'}"
+    if om_data["ref"]:
+        linha_ref += f" | Ref: {om_data['ref']}"
+
+    strap_line = ""
+    if om_data["strap_nao_orig"]:
+        strap_line = "⚠️ Pulseira possivelmente NÃO original\n"
+
+    link = build_link(product)
+    caption = (
+        f"⌚ OMEGA — {etiqueta}\n"
+        f"\n{linha_ref}\n"
+        f"📝 {translate(product['title'])[:70]}\n"
+        f"💰 Compra: {convert(price)}\n"
+        f"🏷️ {tipo}\n"
+        f"{auction_info}"
+        f"{strap_line}"
+        f"🔗 {link}\n"
+        f"\n━━━━━━━━━━\n"
+    )
+    image_url = product.get("image")
+    if image_url:
+        try:
+            await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+            return
+        except Exception as e:
+            log.warning("Falha ao enviar foto Omega (%s); só texto.", e)
+    await bot.send_message(chat_id=CHAT_ID, text=caption)
+
+
 async def send_gs_item(product, gs_data):
     """Alerta de Grand Seiko com classificação, referência e faixa de venda BR."""
     price = product["price"]
@@ -541,9 +592,13 @@ def fetch_keyword(keyword):
     # Grand Seiko: sem piso na API (pega leilões que começam baratos) e teto
     # geral de compra do GS. O gs_evaluate() faz a triagem fina depois.
     is_gs_kw = keyword in gs.GS_KEYWORDS
+    is_om_kw = keyword in om.OMEGA_KEYWORDS
     if is_gs_kw:
         min_p = None
         max_p = int(gs.GS_MAX_COMPRA_BRL / gs.JPY_TO_BRL)   # ~R$10.000 em ¥
+    elif is_om_kw:
+        min_p = None
+        max_p = int(om.OMEGA_MAX_COMPRA_BRL / om.JPY_TO_BRL)  # ~R$10.000 em ¥
     else:
         min_p = 20_000
 
@@ -595,12 +650,15 @@ async def search_loop():
                 continue
 
             for p in products:
-                # Grand Seiko tem avaliação própria (categoria separada).
+                # Grand Seiko e Omega têm avaliação própria (categorias separadas).
                 gs_data = gs.gs_evaluate(p["title"], p["price"],
                                          p["raw"].get("description", ""))
                 is_gs = gs_data is not None
-                # Se NÃO é GS válido, aplica o filtro normal (Bvlgari etc.).
-                if not is_gs and not valid(p["title"], p["raw"].get("description", ""), p["price"]):
+                om_data = None if is_gs else om.omega_evaluate(p["title"], p["price"],
+                                         p["raw"].get("description", ""))
+                is_om = om_data is not None
+                # Se não é GS nem Omega, aplica o filtro normal (Bvlgari etc.).
+                if not is_gs and not is_om and not valid(p["title"], p["raw"].get("description", ""), p["price"]):
                     continue
 
                 uid    = f'{p["storeName"]}:{p["sku"]}'
@@ -645,6 +703,8 @@ async def search_loop():
 
                 if is_gs:
                     await send_gs_item(p, gs_data)
+                elif is_om:
+                    await send_omega_item(p, om_data)
                 else:
                     await send_new_item(p, k)
                 _hb_stats["novos"] += 1
