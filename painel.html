@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radar — Oportunidades</title>
+<style>
+  :root{
+    --bg:#fbfbfd;--surface:#ffffff;--hair:#e8e8ed;
+    --ink:#1d1d1f;--ink-2:#6e6e73;--ink-3:#a1a1a6;
+    --blue:#0071e3;--green:#34c759;--orange:#ff9f0a;--red:#ff3b30;--gold:#e8b923;
+    --radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,sans-serif;line-height:1.47}
+  .tnum{font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+
+  nav{position:sticky;top:0;z-index:30;
+    background:rgba(251,251,253,.8);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:1px solid var(--hair);padding:0 22px;height:52px;display:flex;align-items:center;gap:18px}
+  .mark{font-size:19px;font-weight:600;letter-spacing:-.02em}
+  .mark span{color:var(--ink-3);font-weight:400}
+  .navstats{margin-left:auto;display:flex;gap:22px;font-size:13px;color:var(--ink-2)}
+  .navstats b{color:var(--ink);font-weight:600}
+
+  .hero{padding:40px 22px 24px;max-width:980px;margin:0 auto;text-align:center}
+  .hero h1{font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1.08}
+  .hero p{font-size:17px;color:var(--ink-2);margin-top:8px}
+
+  .toolbar{position:sticky;top:52px;z-index:20;background:rgba(251,251,253,.82);
+    backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
+    padding:14px 22px;max-width:1120px;margin:0 auto}
+  .segwrap{display:flex;justify-content:center;margin-bottom:12px}
+  .seg{display:inline-flex;background:#ededf0;border-radius:10px;padding:2px;flex-wrap:wrap;justify-content:center}
+  .seg button{border:none;background:transparent;padding:7px 15px;border-radius:8px;
+    font-size:13.5px;font-weight:500;color:var(--ink);cursor:pointer;transition:all .18s;display:flex;align-items:center;gap:5px}
+  .seg button.on{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);font-weight:600}
+  .seg button.saved-tab.on{color:#b8901a}
+  .seg .cnt{font-size:11px;background:rgba(0,0,0,.08);border-radius:100px;padding:0 6px;min-width:17px;text-align:center}
+  .filters{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;align-items:center}
+  .search{width:min(320px,68vw);background:#ededf0;border:none;border-radius:10px;
+    padding:9px 14px 9px 34px;font-size:14px;color:var(--ink);
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%236e6e73' stroke-width='2.2'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.5' y2='16.5'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:12px center}
+  .search::placeholder{color:var(--ink-3)}
+  .search:focus{outline:2px solid var(--blue)}
+  .pill{background:#ededf0;border:none;border-radius:10px;padding:9px 12px;font-size:13.5px;color:var(--ink);cursor:pointer;font-weight:500}
+
+  main{max-width:920px;margin:0 auto;padding:8px 22px 80px}
+
+  /* banner da aba salvos */
+  .savedbar{display:none;align-items:center;gap:12px;background:#fffbe9;border:1px solid #f2e3a8;
+    border-radius:14px;padding:12px 16px;margin-top:18px;font-size:14px;color:#8a6d12}
+  .savedbar.show{display:flex}
+  .savedbar b{color:#6b530a}
+  .savedbar .actions{margin-left:auto;display:flex;gap:8px}
+  .savedbar button{border:none;border-radius:9px;padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer}
+  .btn-export{background:#e8b923;color:#4a3a00}
+  .btn-clear{background:transparent;color:#a08420;border:1px solid #e3d18a!important}
+
+  .daysection{margin-top:26px}
+  .dayrow{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;padding:0 4px}
+  .dayrow h2{font-size:20px;font-weight:700;letter-spacing:-.02em}
+  .dayrow .n{font-size:13px;color:var(--ink-3)}
+
+  .list{display:flex;flex-direction:column;gap:8px}
+  .card{background:var(--surface);border-radius:var(--radius);overflow:hidden;
+    box-shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.03);
+    display:flex;align-items:stretch;transition:transform .2s cubic-bezier(.2,.7,.2,1),box-shadow .2s;position:relative}
+  .card:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(0,0,0,.05),0 10px 30px rgba(0,0,0,.07)}
+  .card.is-saved{box-shadow:0 0 0 1.5px var(--gold),0 4px 16px rgba(232,185,35,.12)}
+
+  .thumb{width:78px;min-width:78px;background:#f5f5f7;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .thumb img{width:100%;height:100%;object-fit:cover}
+  .thumb .ph{font-size:12px;font-weight:700;letter-spacing:.03em;opacity:.5}
+  .thumb.gs{background:linear-gradient(135deg,#eef3fc,#e2ebf9)}.thumb.gs .ph{color:#5b8def}
+  .thumb.omega{background:linear-gradient(135deg,#f7f2e4,#f0e8d2)}.thumb.omega .ph{color:#b8912e}
+  .thumb.bvl{background:linear-gradient(135deg,#f2f2f4,#e8e8ec)}.thumb.bvl .ph{color:#8e8e93}
+
+  .body{flex:1;padding:11px 14px;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
+  .top{display:flex;align-items:center;gap:8px}
+  .brand{font-size:11.5px;font-weight:600}
+  .brand.gs{color:#0071e3}.brand.omega{color:#bf9b30}.brand.bvl{color:#8e8e93}
+  .refnum{font-size:11.5px;color:var(--ink-3)}
+  .badge{font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:100px}
+  .badge.prio{background:rgba(52,199,89,.15);color:#248a3d}
+  .badge.ana{background:rgba(255,159,10,.15);color:#c67c00}
+  .badge.junk{background:rgba(255,59,48,.13);color:#d70015}
+  .ttl{font-size:12.5px;color:var(--ink-2);line-height:1.3;
+    display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+  .btm{display:flex;align-items:baseline;gap:9px;margin-top:3px}
+  .price{font-size:19px;font-weight:700;letter-spacing:-.02em}
+  .yen{font-size:11.5px;color:var(--ink-3)}
+  .sell{font-size:11.5px;color:#248a3d;font-weight:500}
+  .btm .hora{margin-left:auto;font-size:11.5px;color:var(--ink-3)}
+
+  /* coluna de ações à direita: salvar + abrir */
+  .side{display:flex;flex-direction:column;border-left:1px solid var(--hair)}
+  .side button,.side a{flex:1;border:none;background:transparent;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;width:46px;font-size:17px;
+    color:var(--ink-3);text-decoration:none;transition:background .15s,color .15s}
+  .side button:hover{background:#faf6e6}
+  .side .star.on{color:var(--gold)}
+  .side a:hover{background:#eef5ff;color:var(--blue)}
+  .side .divider{height:1px;background:var(--hair)}
+
+  .empty{text-align:center;color:var(--ink-3);padding:70px 20px;font-size:16px}
+  .empty .big{font-size:34px;display:block;margin-bottom:10px;opacity:.4}
+
+  @media(max-width:600px){
+    .hero{padding:28px 20px 18px}.hero h1{font-size:25px}.hero p{font-size:14px}
+    .navstats{display:none}.thumb{width:60px;min-width:60px}.price{font-size:17px}.ttl{-webkit-line-clamp:2}
+  }
+</style>
+</head>
+<body>
+<nav>
+  <div class="mark">Radar <span>/ oportunidades</span></div>
+  <div class="navstats">
+    <span><b class="tnum" id="s-total">—</b> no radar</span>
+    <span><b class="tnum" id="s-prio">—</b> prioridade</span>
+    <span><b class="tnum" id="s-hoje">—</b> hoje</span>
+  </div>
+</nav>
+
+<div class="hero">
+  <h1>As melhores oportunidades,<br>reunidas num só lugar.</h1>
+  <p>Relógios capturados no Japão, prontos pra sua análise.</p>
+</div>
+
+<div class="toolbar">
+  <div class="segwrap">
+    <div class="seg" id="seg">
+      <button class="on" data-brand="all">Todas</button>
+      <button data-brand="Grand Seiko">Grand Seiko</button>
+      <button data-brand="Omega">Omega</button>
+      <button data-brand="Bvlgari">Bvlgari</button>
+      <button class="saved-tab" data-brand="__saved__">★ Salvos <span class="cnt" id="savedcnt">0</span></button>
+    </div>
+  </div>
+  <div class="filters">
+    <input class="search" id="q" placeholder="Buscar referência ou modelo">
+    <select class="pill" id="sortby">
+      <option value="recent">Mais recentes</option>
+      <option value="cheap">Menor preço</option>
+      <option value="expensive">Maior preço</option>
+    </select>
+    <select class="pill" id="status">
+      <option value="all">Todos</option>
+      <option value="PRIORIDADE">Prioridade</option>
+      <option value="ANALISAR">Analisar</option>
+      <option value="JUNK">Junk</option>
+    </select>
+  </div>
+</div>
+
+<main>
+  <div class="savedbar" id="savedbar">
+    <span>⭐ Estes são os anúncios que você <b>salvou</b> pra acompanhar.</span>
+    <div class="actions">
+      <button class="btn-export" id="btnExport">Exportar lista</button>
+      <button class="btn-clear" id="btnClear">Limpar salvos</button>
+    </div>
+  </div>
+  <div id="feed"></div>
+</main>
+
+<script>
+// ===== DADOS REAIS: vêm do bot via /dados.json =====
+// Em produção, a página é servida pelo próprio bot, então /dados.json é relativo.
+// Se você hospedar a página separada (GitHub Pages), troque API_URL pela URL
+// completa do bot, ex.: "https://seu-bot.up.railway.app/dados.json"
+const API_URL = (location.protocol.startsWith("http") ? "" : "https://SEU-BOT.up.railway.app") + "/dados.json";
+let DADOS = [];
+
+async function carregar(){
+  try{
+    const r = await fetch(API_URL, {cache:"no-store"});
+    DADOS = await r.json();
+  }catch(e){
+    console.error("Falha ao carregar dados:", e);
+    document.getElementById('feed').innerHTML =
+      '<div class="empty">Não consegui carregar os dados.<br>Verifique se o bot está no ar.</div>';
+    return;
+  }
+  render();
+}
+
+const BK={"Grand Seiko":"gs","Omega":"omega","Bvlgari":"bvl"};
+const ABBR={"Grand Seiko":"GS","Omega":"Ω","Bvlgari":"BVL"};
+const BADGE={PRIORIDADE:["prio","Prioridade"],ANALISAR:["ana","Analisar"],JUNK:["junk","Junk"]};
+
+// ===== FAVORITOS (localStorage) =====
+const LS_KEY="radar_salvos_v1";
+let salvos=new Set(JSON.parse(localStorage.getItem(LS_KEY)||"[]"));
+function persistSalvos(){localStorage.setItem(LS_KEY,JSON.stringify([...salvos]))}
+function toggleSalvo(id){
+  if(salvos.has(id))salvos.delete(id);else salvos.add(id);
+  persistSalvos();render();
+}
+
+let fMarca="all";
+const q=document.getElementById('q'),sortby=document.getElementById('sortby'),statusSel=document.getElementById('status');
+document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#seg button').forEach(x=>x.classList.remove('on'));b.classList.add('on');fMarca=b.dataset.brand;render();});
+[q,sortby,statusSel].forEach(el=>el.addEventListener('input',render));
+
+document.getElementById('btnClear').onclick=()=>{
+  if(confirm("Remover todos os salvos?")){salvos.clear();persistSalvos();render();}
+};
+document.getElementById('btnExport').onclick=()=>{
+  const items=DADOS.filter(d=>salvos.has(d.id));
+  if(!items.length){alert("Nenhum salvo pra exportar.");return;}
+  const txt=items.map(d=>`• ${d.marca} ${d.ref||''} — R$ ${fmtBRL(d.preco_brl)} (¥${fmtBRL(d.preco_jpy)})\n  ${d.titulo}\n  ${d.url}`).join("\n\n");
+  navigator.clipboard.writeText(txt).then(()=>alert("Lista copiada! Cole no WhatsApp/Telegram pro sócio.")).catch(()=>{
+    prompt("Copie a lista:",txt);
+  });
+};
+
+const fmtBRL=n=>n.toLocaleString('pt-BR');
+function fmtDia(ts){const d=new Date(ts),h=new Date(),o=new Date(Date.now()-864e5);
+  const s=(a,b)=>a.toDateString()===b.toDateString();
+  if(s(d,h))return"Hoje";if(s(d,o))return"Ontem";
+  return d.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'});}
+const fmtHora=ts=>new Date(ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+
+function render(){
+  const modoSalvos=fMarca==="__saved__";
+  document.getElementById('savedbar').classList.toggle('show',modoSalvos);
+  document.getElementById('savedcnt').textContent=salvos.size;
+
+  let arr=DADOS.filter(d=>{
+    if(modoSalvos){if(!salvos.has(d.id))return false;}
+    else if(fMarca!=="all"&&d.marca!==fMarca)return false;
+    if(statusSel.value!=="all"&&d.status!==statusSel.value)return false;
+    const t=q.value.toLowerCase().trim();
+    if(t&&!(d.titulo.toLowerCase().includes(t)||(d.ref||"").toLowerCase().includes(t)||d.marca.toLowerCase().includes(t)))return false;
+    return true;});
+  if(sortby.value==="cheap")arr.sort((a,b)=>a.preco_brl-b.preco_brl);
+  else if(sortby.value==="expensive")arr.sort((a,b)=>b.preco_brl-a.preco_brl);
+  else arr.sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+
+  document.getElementById('s-total').textContent=DADOS.length;
+  document.getElementById('s-prio').textContent=DADOS.filter(d=>d.status==="PRIORIDADE").length;
+  document.getElementById('s-hoje').textContent=DADOS.filter(d=>fmtDia(d.ts)==="Hoje").length;
+
+  const feed=document.getElementById('feed');
+  if(!arr.length){
+    feed.innerHTML=modoSalvos
+      ?'<div class="empty"><span class="big">★</span>Você ainda não salvou nenhum anúncio.<br>Toque na estrela de um item pra guardá-lo aqui.</div>'
+      :'<div class="empty">Nada por aqui com esses filtros.</div>';
+    return;
+  }
+  const g={};arr.forEach(d=>{(g[fmtDia(d.ts)]=g[fmtDia(d.ts)]||[]).push(d)});
+  feed.innerHTML=Object.entries(g).map(([dia,items])=>`
+    <section class="daysection">
+      <div class="dayrow"><h2>${dia}</h2><span class="n">${items.length} ${items.length===1?'item':'itens'}</span></div>
+      <div class="list">${items.map(card).join('')}</div>
+    </section>`).join('');
+}
+function card(d){
+  const bk=BK[d.marca],[bc,bt]=BADGE[d.status];
+  const on=salvos.has(d.id);
+  const thumb=d.foto?`<div class="thumb"><img src="${d.foto}"></div>`
+    :`<div class="thumb ${bk}"><span class="ph">${ABBR[d.marca]}</span></div>`;
+  return `<div class="card ${on?'is-saved':''}">
+    ${thumb}
+    <div class="body">
+      <div class="top"><span class="brand ${bk}">${d.marca}</span>${d.ref?`<span class="refnum">· ${d.ref}</span>`:''}<span class="badge ${bc}">${bt}</span></div>
+      <div class="ttl">${d.titulo}</div>
+      <div class="btm">
+        <span class="price tnum">R$ ${fmtBRL(d.preco_brl)}</span>
+        <span class="yen tnum">¥${fmtBRL(d.preco_jpy)}</span>
+        ${d.venda?`<span class="sell">venda ${d.venda}</span>`:''}
+        <span class="hora">${d.tipo==="Leilão"?"🔨":"🏷️"} ${fmtHora(d.ts)}</span>
+      </div>
+    </div>
+    <div class="side">
+      <button class="star ${on?'on':''}" title="${on?'Remover dos salvos':'Salvar'}" onclick="toggleSalvo('${d.id}')">${on?'★':'☆'}</button>
+      <div class="divider"></div>
+      <a href="${d.url}" target="_blank" title="Abrir no ZenMarket">↗</a>
+    </div>
+  </div>`;
+}
+carregar();
+// atualiza a cada 3 min pra pegar novas oportunidades
+setInterval(carregar, 3*60*1000);
+</script>
+</body>
+</html>
