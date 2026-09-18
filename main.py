@@ -109,6 +109,22 @@ cursor.execute("CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)")
 cursor.execute("CREATE TABLE IF NOT EXISTS seen_content (fp TEXT PRIMARY KEY)")
 cursor.execute("CREATE TABLE IF NOT EXISTS sku_prices (uid TEXT PRIMARY KEY, price INTEGER)")
 cursor.execute("""
+    CREATE TABLE IF NOT EXISTS oportunidades (
+        uid        TEXT PRIMARY KEY,
+        marca      TEXT,
+        ref        TEXT,
+        titulo     TEXT,
+        preco_brl  INTEGER,
+        preco_jpy  INTEGER,
+        tipo       TEXT,
+        status     TEXT,
+        venda      TEXT,
+        foto       TEXT,
+        url        TEXT,
+        ts         TEXT
+    )
+""")
+cursor.execute("""
     CREATE TABLE IF NOT EXISTS auctions (
         id        TEXT PRIMARY KEY,
         title     TEXT,
@@ -211,6 +227,34 @@ def remove_auction(id):
 # CONFIGURAÇÕES (idênticas à v1)
 # ─────────────────────────────────────────────
 JPY_TO_BRL = 0.035
+
+# Buffer circular de oportunidades exibidas na landing page.
+OPS_LIMIT = int(os.getenv("OPS_LIMIT", "2000"))
+
+def salvar_oportunidade(uid, marca, ref, titulo, preco_brl, preco_jpy,
+                        tipo, status, venda, foto, url):
+    """Grava a oportunidade e mantém o buffer no limite (apaga as mais antigas)."""
+    cursor.execute("""
+        INSERT OR REPLACE INTO oportunidades
+        (uid, marca, ref, titulo, preco_brl, preco_jpy, tipo, status, venda, foto, url, ts)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (uid, marca, ref, titulo, preco_brl, preco_jpy, tipo, status, venda, foto, url,
+          datetime.now(timezone.utc).isoformat()))
+    # Buffer circular: mantém só as OPS_LIMIT mais recentes.
+    cursor.execute("""
+        DELETE FROM oportunidades WHERE uid NOT IN (
+            SELECT uid FROM oportunidades ORDER BY ts DESC LIMIT ?
+        )
+    """, (OPS_LIMIT,))
+    conn.commit()
+
+def listar_oportunidades():
+    cursor.execute("""
+        SELECT uid, marca, ref, titulo, preco_brl, preco_jpy, tipo, status, venda, foto, url, ts
+        FROM oportunidades ORDER BY ts DESC
+    """)
+    cols = ["uid","marca","ref","titulo","preco_brl","preco_jpy","tipo","status","venda","foto","url","ts"]
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
 # Tetos definidos em REAIS (R$) e convertidos para ienes automaticamente.
 # Para ajustar no futuro: mude só o valor em R$ aqui embaixo.
@@ -742,10 +786,27 @@ async def search_loop():
 
                 if is_gs:
                     await send_gs_item(p, gs_data)
+                    _marca, _ref, _status, _venda = "Grand Seiko", gs_data.get("ref"), gs_data.get("classificacao"), gs_data.get("sell_range")
                 elif is_om:
                     await send_omega_item(p, om_data)
+                    _marca, _ref, _status, _venda = "Omega", om_data.get("ref"), om_data.get("classificacao"), None
                 else:
                     await send_new_item(p, k)
+                    _marca, _ref, _status, _venda = "Bvlgari", None, "ANALISAR", None
+
+                # Salva a oportunidade pra landing page (buffer circular).
+                try:
+                    _tipo = "Leilão" if p.get("bids") is not None else "Preço fixo"
+                    salvar_oportunidade(
+                        uid=uid, marca=_marca, ref=_ref,
+                        titulo=translate(p["title"])[:120],
+                        preco_brl=int(p["price"] * JPY_TO_BRL), preco_jpy=p["price"],
+                        tipo=_tipo, status=_status, venda=_venda,
+                        foto=p.get("image"), url=build_link(p),
+                    )
+                except Exception as e:
+                    log.warning("Falha ao salvar oportunidade: %s", e)
+
                 _hb_stats["novos"] += 1
                 await asyncio.sleep(3)   # respiro maior entre mensagens (evita flood control)
 
@@ -870,10 +931,53 @@ async def auction_monitor_loop():
 # ─────────────────────────────────────────────
 # ENTRY POINT
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# SERVIDOR WEB — serve os dados pra landing page
+# ─────────────────────────────────────────────
+async def start_web_server():
+    """Sobe um servidor HTTP leve que serve /dados.json e a página.
+    Roda em paralelo com o scraper (mesmo event loop)."""
+    from aiohttp import web
+    import json as _json
+
+    async def dados_json(request):
+        ops = listar_oportunidades()
+        return web.Response(
+            text=_json.dumps(ops, ensure_ascii=False),
+            content_type="application/json",
+            headers={"Access-Control-Allow-Origin": "*"},  # deixa a página ler
+        )
+
+    async def health(request):
+        return web.Response(text="ok")
+
+    async def index(request):
+        # serve a página se o arquivo existir; senão, um aviso simples.
+        try:
+            with open("painel.html", encoding="utf-8") as f:
+                return web.Response(text=f.read(), content_type="text/html")
+        except FileNotFoundError:
+            return web.Response(text="Radar rodando. Dados em /dados.json",
+                                content_type="text/plain")
+
+    app = web.Application()
+    app.router.add_get("/", index)
+    app.router.add_get("/dados.json", dados_json)
+    app.router.add_get("/health", health)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", "8080"))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    log.info("Servidor web ativo na porta %s (/dados.json).", port)
+
+
 async def main():
     log.info("ZenScrapperBot v2 iniciado — API stream | %s keywords | poll=%ss",
              len(KEYWORDS), POLL_INTERVAL)
     await asyncio.gather(
+        start_web_server(),
         search_loop(),
         auction_monitor_loop(),
         watchlist_loop(),
