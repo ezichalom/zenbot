@@ -26,6 +26,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from telegram import Bot
+from telegram.error import RetryAfter, TimedOut
 from deep_translator import GoogleTranslator
 
 from zenmarket_stream import search as zen_search, STORE
@@ -64,6 +65,34 @@ HEARTBEAT_HOURS = float(os.getenv("HEARTBEAT_HOURS", "6"))
 _hb_stats = {"ok": 0, "novos": 0, "erros": 0, "last": 0.0, "alerted_down": False}
 
 bot = Bot(token=TOKEN)
+
+
+async def safe_message(**kwargs):
+    """Envia mensagem tratando flood control (espera e reenvia)."""
+    for _ in range(3):
+        try:
+            return await bot.send_message(**kwargs)
+        except RetryAfter as e:
+            await asyncio.sleep(e.retry_after + 1)
+        except TimedOut:
+            await asyncio.sleep(3)
+    # última tentativa sem capturar
+    try:
+        return await bot.send_message(**kwargs)
+    except Exception as e:
+        log.warning("Falha final ao enviar mensagem: %s", e)
+
+
+async def safe_photo(**kwargs):
+    """Envia foto tratando flood control; se falhar, o chamador cai pra texto."""
+    for _ in range(3):
+        try:
+            return await safe_photo(**kwargs)
+        except RetryAfter as e:
+            await asyncio.sleep(e.retry_after + 1)
+        except TimedOut:
+            await asyncio.sleep(3)
+    return await bot.send_photo(**kwargs)  # deixa estourar pro fallback texto
 
 # ─────────────────────────────────────────────
 # BANCO DE DADOS (idêntico à v1)
@@ -416,11 +445,11 @@ async def send_price_drop(product, old_price):
     image_url = product.get("image")
     if image_url:
         try:
-            await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+            await safe_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
             return
         except Exception as e:
             log.warning("Falha ao enviar foto da queda (%s); só texto.", e)
-    await bot.send_message(chat_id=CHAT_ID, text=caption)
+    await safe_message(chat_id=CHAT_ID, text=caption)
 
 
 async def send_new_item(product, keyword):
@@ -456,12 +485,12 @@ async def send_new_item(product, keyword):
     image_url = product.get("image")
     if image_url:
         try:
-            await bot.send_photo(chat_id=destino, photo=image_url, caption=caption)
+            await safe_photo(chat_id=destino, photo=image_url, caption=caption)
             return
         except Exception as e:
             log.warning("Falha ao enviar foto (%s); enviando só texto.", e)
 
-    await bot.send_message(chat_id=destino, text=caption)
+    await safe_message(chat_id=destino, text=caption)
 
 async def send_omega_item(product, om_data):
     """Alerta de Omega com classificação, linha e referência. Vai pro grupo."""
@@ -505,11 +534,11 @@ async def send_omega_item(product, om_data):
     image_url = product.get("image")
     if image_url:
         try:
-            await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+            await safe_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
             return
         except Exception as e:
             log.warning("Falha ao enviar foto Omega (%s); só texto.", e)
-    await bot.send_message(chat_id=CHAT_ID, text=caption)
+    await safe_message(chat_id=CHAT_ID, text=caption)
 
 
 async def send_gs_item(product, gs_data):
@@ -562,11 +591,11 @@ async def send_gs_item(product, gs_data):
     image_url = product.get("image")
     if image_url:
         try:
-            await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+            await safe_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
             return
         except Exception as e:
             log.warning("Falha ao enviar foto GS (%s); só texto.", e)
-    await bot.send_message(chat_id=CHAT_ID, text=caption)
+    await safe_message(chat_id=CHAT_ID, text=caption)
 
 
 async def send_auction_ending(item_row, hours_left):
@@ -584,7 +613,7 @@ async def send_auction_ending(item_row, hours_left):
         f"🔗 {link}\n"
         f"\n━━━━━━━━━━\n"   # separador entre anúncios
     )
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
+    await safe_message(chat_id=CHAT_ID, text=msg)
 
 # ─────────────────────────────────────────────
 # BUSCA VIA API STREAM (substitui mercari() e yahoo())
@@ -634,7 +663,7 @@ async def search_loop():
                     # Estava em falha e voltou — avisa recuperação.
                     _hb_stats["alerted_down"] = False
                     try:
-                        await bot.send_message(chat_id=CHAT_ID,
+                        await safe_message(chat_id=CHAT_ID,
                             text="✅ Bot recuperado — buscas voltaram a funcionar.")
                     except Exception:
                         pass
@@ -648,7 +677,7 @@ async def search_loop():
                     if not _hb_stats["alerted_down"]:
                         _hb_stats["alerted_down"] = True
                         try:
-                            await bot.send_message(chat_id=CHAT_ID,
+                            await safe_message(chat_id=CHAT_ID,
                                 text=("⚠️ ATENÇÃO: 3 buscas falharam seguidas "
                                       "(possível bloqueio Cloudflare). O bot vai "
                                       "tentar o CapSolver automaticamente e pausar "
@@ -718,7 +747,7 @@ async def search_loop():
                 else:
                     await send_new_item(p, k)
                 _hb_stats["novos"] += 1
-                await asyncio.sleep(1)   # respiro entre mensagens Telegram
+                await asyncio.sleep(3)   # respiro maior entre mensagens (evita flood control)
 
             await asyncio.sleep(5)       # respiro entre keywords
 
@@ -728,7 +757,7 @@ async def search_loop():
         if agora - _hb_stats["last"] >= HEARTBEAT_HOURS * 3600:
             _hb_stats["last"] = agora
             try:
-                await bot.send_message(chat_id=CHAT_ID, text=(
+                await safe_message(chat_id=CHAT_ID, text=(
                     f"💓 Bot ativo. Últimas {HEARTBEAT_HOURS:.0f}h: "
                     f"{_hb_stats['ok']} buscas OK, {_hb_stats['novos']} novos, "
                     f"{_hb_stats['erros']} erros."))
@@ -792,7 +821,7 @@ async def watchlist_loop():
                     f"💰 Agora: {convert(preco_atual)}\n"
                     f"🔗 {achado.get('url') or ''}\n"
                 )
-                await bot.send_message(chat_id=CHAT_ID, text=msg)
+                await safe_message(chat_id=CHAT_ID, text=msg)
                 set_watch_price(item["sku"], preco_atual)
             elif preco_atual > preco_antigo:
                 set_watch_price(item["sku"], preco_atual)  # subiu: atualiza base
