@@ -56,6 +56,9 @@ OMEGA_BAD = [
     "レディース","ladies","lady's","女性用","婦人",
     "社外","aftermarket","レプリカ","replica","偽物","fake","コピー",
     "部品取り","パーツ","文字盤のみ","ケースのみ","針のみ","空箱","箱のみ",
+    # Swatch / MoonSwatch (colab plástica — não é o Omega que queremos)
+    "swatch","スウォッチ","moonswatch","ムーンスウォッチ","bioceramic","バイオセラミック",
+    "mission to","ミッション",
 ]
 
 # ── Acessório DEFINITIVO (bloqueia sempre) ──
@@ -72,6 +75,11 @@ OMEGA_ACESSORIO = [
     "ボックス","時計用ボックス","純正ボックス","box only","箱のみ","空箱",
     "メンテナンス","メンテナンスキット","キット","kit","クリーニング","時計用",
     "説明書","保証書のみ","冊子","カタログ","catalog",
+    # não-relógio / tranqueira (gorro, roupa, chaveiro, adesivo, etc.)
+    "帽子","ニット帽","キャップ","cap","hat","beanie","tシャツ","tシャツ","shirt","パーカー",
+    "ステッカー","sticker","シール","ポスター","poster","キーホルダー","keychain","ストラップ",
+    "マグカップ","mug","タオル","towel","ぬいぐるみ","フィギュア","おもちゃ","toy","雑誌","magazine",
+    "ノベルティ","景品","カレンダー","calendar","下敷き","ピンバッジ","バッジ","badge","pin",
 ]
 
 # ── Defeito / junk ──
@@ -138,6 +146,11 @@ def omega_evaluate(title, price_jpy, description=""):
 
     # Acessório avulso → descarta
     if any(a in t for a in OMEGA_ACESSORIO):
+        return None
+
+    # Swatch/MoonSwatch: bloqueia SEMPRE (colab plástica, não é Omega de valor).
+    if any(x in t for x in ["swatch","スウォッチ","moonswatch","ムーンスウォッチ",
+                            "bioceramic","バイオセラミック"]):
         return None
 
     # Exclusões duras

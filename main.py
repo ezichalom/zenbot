@@ -68,7 +68,12 @@ bot = Bot(token=TOKEN)
 # ─────────────────────────────────────────────
 # BANCO DE DADOS (idêntico à v1)
 # ─────────────────────────────────────────────
-conn   = sqlite3.connect("seen.db")
+# Banco em /data (Volume do Railway) se existir — sobrevive a redeploys,
+# acabando com a "enxurrada" de re-alertas. Sem Volume, cai no local.
+DB_DIR  = "/data" if os.path.isdir("/data") else "."
+DB_PATH = os.path.join(DB_DIR, "seen.db")
+conn   = sqlite3.connect(DB_PATH)
+log.info("Banco de dados em: %s", DB_PATH)
 cursor = conn.cursor()
 
 cursor.execute("CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)")
@@ -347,6 +352,11 @@ STRAP_HARD = [
     "ベルト用","バンド用","交換用","替えベルト","替えバンド",
     "尾錠","バックル","dバックル","buckle","clasp","中留","中留め",
     "コンビ ブレス","strap only","band only","link","links",
+    # não-relógio / tranqueira
+    "帽子","ニット帽","キャップ","cap","hat","tシャツ","shirt","パーカー",
+    "ステッカー","sticker","ポスター","poster","キーホルダー","keychain",
+    "タオル","towel","ぬいぐるみ","フィギュア","おもちゃ","雑誌","ノベルティ",
+    "景品","カレンダー","ピンバッジ","バッジ","badge",
 ]
 
 # Sinal forte de relógio real (marca+ref ou a palavra "relógio" em japonês):

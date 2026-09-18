@@ -87,7 +87,12 @@ GS_ACESSORIO_HARD = [
     "box only","箱のみ","空箱","ボックス","時計用ボックス","純正ボックス",  # caixa (katakana tb)
     "メンテナンス","メンテナンスキット","キット","kit","クリーニング",  # kit manutenção/limpeza
     "時計用","お手入れ","cloth","クロス","クリーナー","cleaner",  # para-relógio / limpeza
-    "説明書","保証書のみ","冊子","カタログ","catalog",  # manual/garantia/catálogo avulso
+    "説明書","保証書のみ","冊子","カタログ","catalog",  # manual/garantia/catálogo avulso,
+    # não-relógio / tranqueira
+    "帽子","ニット帽","キャップ","cap","hat","beanie","tシャツ","tシャツ","shirt","パーカー",
+    "ステッカー","sticker","シール","ポスター","poster","キーホルダー","keychain","ストラップ",
+    "マグカップ","mug","タオル","towel","ぬいぐるみ","フィギュア","おもちゃ","toy","雑誌","magazine",
+    "ノベルティ","景品","カレンダー","calendar","下敷き","ピンバッジ","バッジ","badge","pin",
 ]
 
 # Mantida por compatibilidade (não mais usada com exceção — tudo é hard agora).
