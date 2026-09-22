@@ -93,6 +93,9 @@ GS_ACESSORIO_HARD = [
     "ステッカー","sticker","シール","ポスター","poster","キーホルダー","keychain","ストラップ",
     "マグカップ","mug","タオル","towel","ぬいぐるみ","フィギュア","おもちゃ","toy","雑誌","magazine",
     "ノベルティ","景品","カレンダー","calendar","下敷き","ピンバッジ","バッジ","badge","pin",
+    # livro/revista/catálogo (não é relógio)
+    "マスターブック","ブック","book","本","書籍","雑誌","magazine","mook",
+        "カタログ","catalog","写真集","ムック","冊子","読本","ガイドブック",
 ]
 
 # Mantida por compatibilidade (não mais usada com exceção — tudo é hard agora).
@@ -136,7 +139,7 @@ def is_grand_seiko(title):
     return "grand seiko" in t or "グランドセイコー" in t or _REF_RE.search(t) is not None
 
 
-def gs_evaluate(title, price_jpy, description=""):
+def gs_evaluate(title, price_jpy, description="", is_auction=False):
     """
     Avalia um produto Grand Seiko. Retorna None (descartar) ou um dict:
       { ref, calibre, preco_brl, classificacao, sell_range, nao_funciona }
@@ -168,6 +171,9 @@ def gs_evaluate(title, price_jpy, description=""):
 
     brl = _brl(price_jpy)
     if brl <= 0 or brl > GS_MAX_COMPRA_BRL:
+        return None
+    # Piso R$2.000 só para PREÇO FIXO (leilão livre p/ pegar 1円 legítimos).
+    if not is_auction and price_jpy < 57142:
         return None
 
     ref = _detect_ref(t)
