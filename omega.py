@@ -17,8 +17,11 @@ JPY_TO_BRL = 0.035
 # ── Tetos de COMPRA por referência (R$) — chave = ref SEM pontos ──
 # (a normalização remove pontos, então "3510.50" e "3510.50.00" viram "351050")
 OMEGA_REF_MAX_BRL = {
-    # Speedmaster
-    "351050": 9500, "351150": 9000, "351350": 9000, "352050": 9000, "353950": 9500,
+    # Speedmaster (família 3510.xx + 3539.50, teto R$10.000)
+    "351050": 10000, "351052": 10000, "351061": 10000, "351080": 10000,
+    "351081": 10000, "351082": 10000, "353950": 10000,
+    # Speedmaster (outros)
+    "351150": 9000, "351350": 9000, "352050": 9000,
     # Seamaster Professional 300M
     "253180": 7500, "254180": 6000, "225450": 8000, "226450": 6500,
     "255180": 5500, "256180": 4500,
@@ -80,6 +83,9 @@ OMEGA_ACESSORIO = [
     "ステッカー","sticker","シール","ポスター","poster","キーホルダー","keychain","ストラップ",
     "マグカップ","mug","タオル","towel","ぬいぐるみ","フィギュア","おもちゃ","toy","雑誌","magazine",
     "ノベルティ","景品","カレンダー","calendar","下敷き","ピンバッジ","バッジ","badge","pin",
+    # livro/revista/catálogo
+    "マスターブック","ブック","book","本","書籍","雑誌","magazine","mook",
+        "カタログ","catalog","写真集","ムック","冊子","読本","ガイドブック",
 ]
 
 # ── Defeito / junk ──
@@ -133,7 +139,7 @@ def is_omega(title):
     return "omega" in t or "オメガ" in t
 
 
-def omega_evaluate(title, price_jpy, description=""):
+def omega_evaluate(title, price_jpy, description="", is_auction=False):
     """
     Avalia um produto Omega. Retorna None (descartar) ou dict:
       { ref, linha, preco_brl, classificacao, strap_nao_orig }
@@ -165,6 +171,9 @@ def omega_evaluate(title, price_jpy, description=""):
 
     brl = _brl(price_jpy)
     if brl <= 0 or brl > OMEGA_MAX_COMPRA_BRL:
+        return None
+    # Piso R$2.000 só para PREÇO FIXO (leilão livre).
+    if not is_auction and price_jpy < 57142:
         return None
 
     ref = _detect_ref(t)
