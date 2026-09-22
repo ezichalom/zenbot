@@ -430,13 +430,16 @@ STRAP_HARD = [
     "ステッカー","sticker","ポスター","poster","キーホルダー","keychain",
     "タオル","towel","ぬいぐるみ","フィギュア","おもちゃ","雑誌","ノベルティ",
     "景品","カレンダー","ピンバッジ","バッジ","badge",
+    # livro/revista/catálogo
+    "マスターブック","ブック","book","本","書籍","雑誌","magazine","mook",
+        "カタログ","catalog","写真集","ムック","冊子","読本","ガイドブック",
 ]
 
 # Sinal forte de relógio real (marca+ref ou a palavra "relógio" em japonês):
 WATCH_SIGNAL = ["al38","ac38","sd38","waz","caz","aluminium","アルミニウム",
                 "diagono","ディアゴノ","腕時計","自動巻","クォーツ","デイト"]
 
-def valid(title, description, price):
+def valid(title, description, price, is_auction=False):
     """Filtro de qualidade: bloqueios + termo do radar + faixa de preço."""
     t = (title or "").lower()
 
@@ -453,7 +456,7 @@ def valid(title, description, price):
         return False
     if not price:
         return False
-    if price < 20_000:
+    if not is_auction and price < 57142:
         return False
     if is_above_max_price(title, price):
         return False
@@ -734,14 +737,15 @@ async def search_loop():
 
             for p in products:
                 # Grand Seiko e Omega têm avaliação própria (categorias separadas).
+                _is_auction = p.get("bids") is not None
                 gs_data = gs.gs_evaluate(p["title"], p["price"],
-                                         p["raw"].get("description", ""))
+                                         p["raw"].get("description", ""), is_auction=_is_auction)
                 is_gs = gs_data is not None
                 om_data = None if is_gs else om.omega_evaluate(p["title"], p["price"],
-                                         p["raw"].get("description", ""))
+                                         p["raw"].get("description", ""), is_auction=_is_auction)
                 is_om = om_data is not None
                 # Se não é GS nem Omega, aplica o filtro normal (Bvlgari etc.).
-                if not is_gs and not is_om and not valid(p["title"], p["raw"].get("description", ""), p["price"]):
+                if not is_gs and not is_om and not valid(p["title"], p["raw"].get("description", ""), p["price"], is_auction=_is_auction):
                     continue
 
                 uid    = f'{p["storeName"]}:{p["sku"]}'
