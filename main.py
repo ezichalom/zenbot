@@ -284,7 +284,7 @@ KEYWORDS = [
 ]
 
 # Keywords do Grand Seiko (categoria própria — ver grand_seiko.py)
-KEYWORDS += gs.GS_KEYWORDS
+# KEYWORDS += gs.GS_KEYWORDS   # GRAND SEIKO DESATIVADO a pedido do Ezi (descomente para reativar)
 KEYWORDS += om.OMEGA_KEYWORDS
 
 BAD_WORDS = [
