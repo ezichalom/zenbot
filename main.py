@@ -32,6 +32,7 @@ from deep_translator import GoogleTranslator
 from zenmarket_stream import search as zen_search, STORE
 import grand_seiko as gs
 import omega as om
+import cartier as ct
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("zenbot")
@@ -286,6 +287,7 @@ KEYWORDS = [
 # Keywords do Grand Seiko (categoria própria — ver grand_seiko.py)
 # KEYWORDS += gs.GS_KEYWORDS   # GRAND SEIKO DESATIVADO a pedido do Ezi (descomente para reativar)
 KEYWORDS += om.OMEGA_KEYWORDS
+KEYWORDS += ct.CARTIER_KEYWORDS
 
 BAD_WORDS = [
     "parts","部品","box","case","empty","箱のみ",
@@ -426,12 +428,12 @@ STRAP_HARD = [
     "尾錠","バックル","dバックル","buckle","clasp","中留","中留め",
     "コンビ ブレス","strap only","band only","link","links",
     # não-relógio / tranqueira
-    "帽子","ニット帽","キャップ","cap","hat","tシャツ","shirt","パーカー",
+    "帽子","ニット帽","キャップ","tシャツ","shirt","パーカー",
     "ステッカー","sticker","ポスター","poster","キーホルダー","keychain",
     "タオル","towel","ぬいぐるみ","フィギュア","おもちゃ","雑誌","ノベルティ",
     "景品","カレンダー","ピンバッジ","バッジ","badge",
     # livro/revista/catálogo
-    "マスターブック","ブック","book","本","書籍","雑誌","magazine","mook",
+    "マスターブック","ブック","book","単行本","文庫本","書籍","雑誌","magazine","mook",
         "カタログ","catalog","写真集","ムック","冊子","読本","ガイドブック",
 ]
 
@@ -538,6 +540,41 @@ async def send_new_item(product, keyword):
             log.warning("Falha ao enviar foto (%s); enviando só texto.", e)
 
     await safe_message(chat_id=destino, text=caption)
+
+async def send_cartier_item(product, ct_data):
+    """Alerta de Cartier (Panthère / Chronoscaph 21). Vai pro grupo."""
+    price = product["price"]
+    etiqueta = {"PRIORIDADE": "🔥 PRIORIDADE", "ANALISAR": "🔎 ANALISAR",
+                "JUNK": "⚠️ JUNK/DEFEITO"}.get(ct_data["classificacao"], ct_data["classificacao"])
+    tipo = "Leilão" if product.get("bids") is not None else "Preço fixo"
+    auction_info = ""
+    if product.get("bids") is not None:
+        auction_info = f"🔨 Lances: {product['bids']}"
+        if product.get("buyoutPrice"):
+            auction_info += f" | Compra já: ¥{product['buyoutPrice']:,}"
+        auction_info += "\n"
+    if product.get("auctionEndTime"):
+        auction_info += f"🕐 Fim: {product['auctionEndTime']:%d/%m %H:%M} (JST)\n"
+    linha = f"📌 {ct_data['linha']}" + (f" | Ref: {ct_data['ref']}" if ct_data["ref"] else "")
+    caption = (
+        f"⌚ CARTIER — {etiqueta}\n"
+        f"\n{linha}\n"
+        f"📝 {translate(product['title'])[:70]}\n"
+        f"💰 Compra: {convert(price)}\n"
+        f"🏷️ {tipo}\n"
+        f"{auction_info}"
+        f"🔗 {build_link(product)}\n"
+        f"\n━━━━━━━━━━\n"
+    )
+    image_url = product.get("image")
+    if image_url:
+        try:
+            await safe_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+            return
+        except Exception as e:
+            log.warning("Falha ao enviar foto Cartier (%s); só texto.", e)
+    await safe_message(chat_id=CHAT_ID, text=caption)
+
 
 async def send_omega_item(product, om_data):
     """Alerta de Omega com classificação, linha e referência. Vai pro grupo."""
@@ -685,6 +722,9 @@ def fetch_keyword(keyword):
     elif is_om_kw:
         min_p = None
         max_p = int(om.OMEGA_MAX_COMPRA_BRL / om.JPY_TO_BRL)  # ~R$10.000 em ¥
+    elif keyword in ct.CARTIER_KEYWORDS:
+        min_p = None
+        max_p = int(ct.CARTIER_MAX_COMPRA_BRL / ct.JPY_TO_BRL)  # ~R$10.000 em ¥
     else:
         min_p = 20_000
 
@@ -744,8 +784,11 @@ async def search_loop():
                 om_data = None if is_gs else om.omega_evaluate(p["title"], p["price"],
                                          p["raw"].get("description", ""), is_auction=_is_auction)
                 is_om = om_data is not None
+                ct_data = None if (is_gs or is_om) else ct.cartier_evaluate(
+                    p["title"], p["price"], p["raw"].get("description", ""), is_auction=_is_auction)
+                is_ct = ct_data is not None
                 # Se não é GS nem Omega, aplica o filtro normal (Bvlgari etc.).
-                if not is_gs and not is_om and not valid(p["title"], p["raw"].get("description", ""), p["price"], is_auction=_is_auction):
+                if not is_gs and not is_om and not is_ct and not valid(p["title"], p["raw"].get("description", ""), p["price"], is_auction=_is_auction):
                     continue
 
                 uid    = f'{p["storeName"]}:{p["sku"]}'
@@ -794,6 +837,9 @@ async def search_loop():
                 elif is_om:
                     await send_omega_item(p, om_data)
                     _marca, _ref, _status, _venda = "Omega", om_data.get("ref"), om_data.get("classificacao"), None
+                elif is_ct:
+                    await send_cartier_item(p, ct_data)
+                    _marca, _ref, _status, _venda = "Cartier", ct_data.get("ref"), ct_data.get("classificacao"), None
                 else:
                     await send_new_item(p, k)
                     _marca, _ref, _status, _venda = "Bvlgari", None, "ANALISAR", None

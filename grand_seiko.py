@@ -89,12 +89,12 @@ GS_ACESSORIO_HARD = [
     "時計用","お手入れ","cloth","クロス","クリーナー","cleaner",  # para-relógio / limpeza
     "説明書","保証書のみ","冊子","カタログ","catalog",  # manual/garantia/catálogo avulso,
     # não-relógio / tranqueira
-    "帽子","ニット帽","キャップ","cap","hat","beanie","tシャツ","tシャツ","shirt","パーカー",
+    "帽子","ニット帽","キャップ","beanie","tシャツ","tシャツ","shirt","パーカー",
     "ステッカー","sticker","シール","ポスター","poster","キーホルダー","keychain","ストラップ",
     "マグカップ","mug","タオル","towel","ぬいぐるみ","フィギュア","おもちゃ","toy","雑誌","magazine",
-    "ノベルティ","景品","カレンダー","calendar","下敷き","ピンバッジ","バッジ","badge","pin",
+    "ノベルティ","景品","カレンダー","calendar","下敷き","ピンバッジ","バッジ","badge",
     # livro/revista/catálogo (não é relógio)
-    "マスターブック","ブック","book","本","書籍","雑誌","magazine","mook",
+    "マスターブック","ブック","book","単行本","文庫本","書籍","雑誌","magazine","mook",
         "カタログ","catalog","写真集","ムック","冊子","読本","ガイドブック",
 ]
 
